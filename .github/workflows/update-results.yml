@@ -1,0 +1,38 @@
+name: Update Results
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: update-results
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        working-directory: scripts
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Run update
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
+          FOOTBALL_API_KEY: ${{ secrets.FOOTBALL_API_KEY }}
+          FOOTBALL_API_BASE_URL: 'https://api.football-data.org/v4'
+          FOOTBALL_API_COMPETITION_ID: ${{ vars.FOOTBALL_API_COMPETITION_ID || 'WC' }}
+          FOOTBALL_API_SEASON: ${{ vars.FOOTBALL_API_SEASON || '2026' }}
+        run: node updateResults.js

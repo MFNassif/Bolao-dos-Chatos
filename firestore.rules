@@ -1,0 +1,124 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== Helpers =====
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+
+    function gameLockTime(gameId) {
+      // bloqueio é 1h antes do início (timestamp - 1h)
+      return get(/databases/$(database)/documents/games/$(gameId)).data.startTime - duration.value(1, 'h');
+    }
+
+    function isBeforeLock(gameId) {
+      return request.time < gameLockTime(gameId);
+    }
+
+    function isAfterLock(gameId) {
+      return request.time >= gameLockTime(gameId);
+    }
+
+    // ===== Usuários =====
+    // Qualquer usuário logado pode ler dados básicos (necessário p/ ranking).
+    // Apenas o próprio usuário pode CRIAR seu doc, e não pode alterar pontuação/role.
+    match /users/{uid} {
+      allow read: if isSignedIn();
+
+      allow create: if isSelf(uid) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.role == 'user' &&
+        request.resource.data.totalPoints == 0 &&
+        request.resource.data.exactScores == 0 &&
+        request.resource.data.correctResults == 0 &&
+        request.resource.data.predictionsCount == 0;
+
+      // Usuário comum só altera displayName. Nunca toca em pontuação ou role.
+      allow update: if isSelf(uid) &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.username == resource.data.username &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.totalPoints == resource.data.totalPoints &&
+        request.resource.data.exactScores == resource.data.exactScores &&
+        request.resource.data.correctResults == resource.data.correctResults &&
+        request.resource.data.predictionsCount == resource.data.predictionsCount;
+
+      // Admin pode tudo
+      allow update, delete: if isAdmin();
+    }
+
+    // ===== Reserva de usernames =====
+    match /usernames/{username} {
+      allow read: if true; // checar disponibilidade antes do login
+      allow create: if isSignedIn() &&
+        request.resource.data.uid == request.auth.uid;
+      allow delete, update: if isAdmin();
+    }
+
+    // ===== Jogos =====
+    // Todo usuário logado pode ler. Apenas admin e Cloud Functions (admin SDK) escrevem.
+    match /games/{gameId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ===== Palpites =====
+    // Documento: predictions/{gameId_userId}
+    match /predictions/{predictionId} {
+      // Leitura: dono sempre pode ler o próprio.
+      // Outros usuários só podem ler depois que o jogo ficar bloqueado.
+      allow read: if isSignedIn() && (
+        resource.data.userId == request.auth.uid ||
+        isAfterLock(resource.data.gameId) ||
+        isAdmin()
+      );
+
+      // Criação: só o próprio usuário, antes do bloqueio.
+      allow create: if isSignedIn() &&
+        request.resource.data.userId == request.auth.uid &&
+        request.resource.data.gameId is string &&
+        request.resource.data.homePrediction is int &&
+        request.resource.data.awayPrediction is int &&
+        request.resource.data.homePrediction >= 0 &&
+        request.resource.data.awayPrediction >= 0 &&
+        request.resource.data.homePrediction <= 30 &&
+        request.resource.data.awayPrediction <= 30 &&
+        request.resource.data.points == 0 &&
+        isBeforeLock(request.resource.data.gameId);
+
+      // Atualização: só o próprio usuário, antes do bloqueio, sem mexer em points.
+      allow update: if isSignedIn() &&
+        resource.data.userId == request.auth.uid &&
+        request.resource.data.userId == resource.data.userId &&
+        request.resource.data.gameId == resource.data.gameId &&
+        request.resource.data.points == resource.data.points &&
+        isBeforeLock(resource.data.gameId);
+
+      // Admin pode atualizar tudo (recálculo, correções)
+      allow update, delete: if isAdmin();
+    }
+
+    // ===== Configurações do app =====
+    match /settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ===== Logs de sincronização =====
+    match /syncLogs/{logId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}

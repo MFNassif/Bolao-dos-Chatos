@@ -1,0 +1,16 @@
+{
+  "name": "bolao-scripts",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Scripts de sincronização do Bolão (rodam no GitHub Actions)",
+  "type": "commonjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "sync": "node syncGames.js",
+    "update": "node updateResults.js",
+    "recalc": "node recalculate.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.2.0"
+  }
+}

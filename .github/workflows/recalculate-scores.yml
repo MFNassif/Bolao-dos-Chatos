@@ -1,0 +1,32 @@
+name: Recalculate Scores
+
+# Recalcula TODA a pontuação. Usar quando mudar regras ou após ajustes manuais.
+# Apenas manual.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  recalc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: scripts/package.json
+
+      - name: Install deps
+        working-directory: scripts
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Run recalculate
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
+        run: node recalculate.js
