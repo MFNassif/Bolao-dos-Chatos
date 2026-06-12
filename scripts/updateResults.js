@@ -80,65 +80,62 @@ async function nextScheduledStart() {
 }
 
 (async () => {
-  try {
-    const startedAt = Date.now();
-    let failures = 0;
+  const startedAt = Date.now();
+  let failures = 0;
 
-    while (true) {
+  while (true) {
+    // Erros de uma iteracao (indice do Firestore ainda construindo, API fora
+    // do ar, rede) nao derrubam o plantao: contam como falha e tentam de novo.
+    try {
       const decision = await shouldRun();
 
-      if (decision.run) {
-        console.log(`[${new Date().toISOString()}] Running update: ${decision.reason}.`);
-        let success = false;
-        try {
-          const r = await updateResults();
-          success = r.success;
-          if (r.updated > 0 || !r.success) console.log(JSON.stringify(r));
-        } catch (err) {
-          console.error(err);
-        }
-        failures = success ? 0 : failures + 1;
-
-        if (!LOOP) process.exit(success ? 0 : 1);
-        if (failures >= MAX_CONSECUTIVE_FAILURES) {
-          console.error(`Encerrando apos ${failures} falhas seguidas.`);
-          process.exit(1);
-        }
-        if (Date.now() - startedAt + LOOP_INTERVAL_MS > LOOP_MAX_MS) {
-          console.log('Limite de duracao do plantao atingido. Proximo disparo continua.');
+      if (!decision.run) {
+        if (!LOOP) {
+          console.log(`Skipping API call: ${decision.reason}.`);
           process.exit(0);
         }
-        await sleep(LOOP_INTERVAL_MS);
+        // Plantao sem jogo na janela: se o proximo jogo esta perto, dorme ate
+        // a janela abrir; senao encerra e deixa para o proximo disparo do cron.
+        const next = await nextScheduledStart();
+        if (!next) {
+          console.log('Plantao encerrado: nenhum jogo futuro agendado.');
+          process.exit(0);
+        }
+        const windowOpensIn = next.getTime() - PRE_GAME_MINUTES * 60 * 1000 - Date.now();
+        if (windowOpensIn > LOOKAHEAD_MS) {
+          console.log(`Plantao encerrado: proximo jogo so em ${Math.round(windowOpensIn / 60000)} min.`);
+          process.exit(0);
+        }
+        if (Date.now() - startedAt + windowOpensIn > LOOP_MAX_MS) {
+          console.log('Plantao encerrado: janela do proximo jogo excede o limite de duracao.');
+          process.exit(0);
+        }
+        failures = 0;
+        const waitMs = Math.max(windowOpensIn, 30 * 1000);
+        console.log(`[${new Date().toISOString()}] Aguardando ${Math.round(waitMs / 60000)} min ate a janela do proximo jogo.`);
+        await sleep(waitMs);
         continue;
       }
 
-      if (!LOOP) {
-        console.log(`Skipping API call: ${decision.reason}.`);
-        process.exit(0);
+      console.log(`[${new Date().toISOString()}] Running update: ${decision.reason}.`);
+      const r = await updateResults();
+      if (r.updated > 0 || !r.success) console.log(JSON.stringify(r));
+      if (!r.success) throw new Error(r.message || 'updateResults falhou.');
+      failures = 0;
+      if (!LOOP) process.exit(0);
+    } catch (err) {
+      failures += 1;
+      console.error(`Falha ${failures}/${MAX_CONSECUTIVE_FAILURES}:`, err?.message || err);
+      if (!LOOP || failures >= MAX_CONSECUTIVE_FAILURES) {
+        console.error('Encerrando apos falhas seguidas.');
+        process.exit(1);
       }
-
-      // Plantao sem jogo na janela: se o proximo jogo esta perto, dorme ate
-      // a janela abrir; senao encerra e deixa para o proximo disparo do cron.
-      const next = await nextScheduledStart();
-      if (!next) {
-        console.log('Plantao encerrado: nenhum jogo futuro agendado.');
-        process.exit(0);
-      }
-      const windowOpensIn = next.getTime() - PRE_GAME_MINUTES * 60 * 1000 - Date.now();
-      if (windowOpensIn > LOOKAHEAD_MS) {
-        console.log(`Plantao encerrado: proximo jogo so em ${Math.round(windowOpensIn / 60000)} min.`);
-        process.exit(0);
-      }
-      if (Date.now() - startedAt + windowOpensIn > LOOP_MAX_MS) {
-        console.log('Plantao encerrado: janela do proximo jogo excede o limite de duracao.');
-        process.exit(0);
-      }
-      const waitMs = Math.max(windowOpensIn, 30 * 1000);
-      console.log(`[${new Date().toISOString()}] Aguardando ${Math.round(waitMs / 60000)} min ate a janela do proximo jogo.`);
-      await sleep(waitMs);
     }
-  } catch (err) {
-    console.error(err);
-    process.exit(1);
+
+    if (Date.now() - startedAt + LOOP_INTERVAL_MS > LOOP_MAX_MS) {
+      console.log('Limite de duracao do plantao atingido. Proximo disparo continua.');
+      process.exit(0);
+    }
+    await sleep(LOOP_INTERVAL_MS);
   }
 })();
