@@ -31,8 +31,19 @@ async function recalculateGame(gameId) {
   const isFinished = game.status === 'finished';
 
   const preds = await firestore.collection('predictions').where('gameId', '==', gameId).get();
-  const batch = firestore.batch();
+  let batch = firestore.batch();
+  let ops = 0;
   const touched = new Set();
+
+  async function queueSet(ref, data, options) {
+    batch.set(ref, data, options);
+    ops += 1;
+    if (ops >= 450) {
+      await batch.commit();
+      batch = firestore.batch();
+      ops = 0;
+    }
+  }
 
   for (const p of preds.docs) {
     const pd = p.data();
@@ -44,6 +55,12 @@ async function recalculateGame(gameId) {
       );
     }
 
+    const prevPoints = pd.points || 0;
+    const prevExact = pd.exactScoreHit ? 1 : 0;
+    const prevResult = pd.resultHit ? 1 : 0;
+    const nextExact = result.exactScoreHit ? 1 : 0;
+    const nextResult = result.resultHit ? 1 : 0;
+
     const update = {
       points: result.points,
       exactScoreHit: result.exactScoreHit,
@@ -54,14 +71,24 @@ async function recalculateGame(gameId) {
       update.lockedAt = admin.firestore.FieldValue.serverTimestamp();
     }
 
-    batch.set(p.ref, update, { merge: true });
-    touched.add(pd.userId);
-  }
-  await batch.commit();
+    await queueSet(p.ref, update, { merge: true });
 
-  for (const uid of touched) {
-    await recalculateUserAggregates(uid);
+    if (pd.userId) {
+      const deltaPoints = result.points - prevPoints;
+      const deltaExact = nextExact - prevExact;
+      const deltaResult = nextResult - prevResult;
+      if (deltaPoints || deltaExact || deltaResult) {
+        await queueSet(firestore.collection('users').doc(pd.userId), {
+          totalPoints: admin.firestore.FieldValue.increment(deltaPoints),
+          exactScores: admin.firestore.FieldValue.increment(deltaExact),
+          correctResults: admin.firestore.FieldValue.increment(deltaResult),
+          lastScoreUpdate: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      }
+      touched.add(pd.userId);
+    }
   }
+  if (ops > 0) await batch.commit();
   return { predictions: preds.size, users: touched.size };
 }
 
