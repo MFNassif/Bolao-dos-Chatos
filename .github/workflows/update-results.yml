@@ -1,8 +1,18 @@
 name: Update Results
 
+# O cron */5 do GitHub atrasa muito no plano gratis (dispara a cada 1-4h).
+# Por isso o job roda em "modo plantao" (UPDATE_LOOP=1): um unico disparo
+# fica atualizando a cada 90s enquanto houver jogo ao vivo ou prestes a
+# comecar, por ate ~5h30. O push em scripts/ tambem dispara, garantindo
+# cobertura imediata apos qualquer ajuste.
 on:
   schedule:
     - cron: '*/5 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/update-results.yml'
   workflow_dispatch: {}
 
 permissions:
@@ -15,7 +25,7 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
 
@@ -27,7 +37,7 @@ jobs:
         working-directory: scripts
         run: npm ci --omit=dev --no-audit --no-fund
 
-      - name: Run update
+      - name: Run update (plantao)
         working-directory: scripts
         env:
           FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
@@ -35,4 +45,8 @@ jobs:
           FOOTBALL_API_BASE_URL: 'https://api.football-data.org/v4'
           FOOTBALL_API_COMPETITION_ID: ${{ vars.FOOTBALL_API_COMPETITION_ID || 'WC' }}
           FOOTBALL_API_SEASON: ${{ vars.FOOTBALL_API_SEASON || '2026' }}
+          UPDATE_LOOP: '1'
+          UPDATE_LOOP_INTERVAL_SECONDS: '90'
+          UPDATE_LOOP_MAX_MINUTES: '330'
+          UPDATE_LOOP_LOOKAHEAD_MINUTES: '180'
         run: node updateResults.js

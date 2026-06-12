@@ -109,16 +109,20 @@ async function updateResults() {
     console.error('[updateResults] erro:', err);
   }
 
-  await firestore.collection('syncLogs').add({
-    type: 'updateResults',
-    success,
-    message,
-    updated,
-    recalculated,
-    skippedRegressions,
-    durationMs: Date.now() - start,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  });
+  // Em modo plantao o updateResults roda a cada ~90s; so grava log quando
+  // algo mudou ou deu erro, para nao inflar syncLogs (e o limite gratuito).
+  if (!success || updated > 0) {
+    await firestore.collection('syncLogs').add({
+      type: 'updateResults',
+      success,
+      message,
+      updated,
+      recalculated,
+      skippedRegressions,
+      durationMs: Date.now() - start,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+  }
 
   return { success, updated, recalculated, skippedRegressions, message };
 }
