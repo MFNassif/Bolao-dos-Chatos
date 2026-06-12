@@ -1,10 +1,6 @@
 name: Update Results
 
 on:
-  push:
-    paths:
-      - 'scripts/**'
-      - '.github/workflows/update-results.yml'
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch: {}
@@ -29,7 +25,7 @@ jobs:
 
       - name: Install deps
         working-directory: scripts
-        run: npm install --omit=dev --no-audit --no-fund
+        run: npm ci --omit=dev --no-audit --no-fund
 
       - name: Run update
         working-directory: scripts

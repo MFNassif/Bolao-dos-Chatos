@@ -1,8 +1,10 @@
 name: Recalculate Scores
 
-# Recalcula TODA a pontuação. Usar quando mudar regras ou após ajustes manuais.
-# Apenas manual.
+# Recalcula TODA a pontuação. Roda 1x por dia como true-up dos incrementos
+# do updateResults, e manualmente quando mudar regras ou após ajustes.
 on:
+  schedule:
+    - cron: '30 7 * * *'
   workflow_dispatch: {}
 
 permissions:
@@ -23,7 +25,7 @@ jobs:
 
       - name: Install deps
         working-directory: scripts
-        run: npm install --omit=dev --no-audit --no-fund
+        run: npm ci --omit=dev --no-audit --no-fund
 
       - name: Run recalculate
         working-directory: scripts

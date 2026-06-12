@@ -9,6 +9,8 @@ export default function Register() {
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [poolName, setPoolName] = useState('');
+  const [poolPassword, setPoolPassword] = useState('');
   const [checking, setChecking] = useState(false);
   const [available, setAvailable] = useState(null);
   const [error, setError] = useState(null);
@@ -29,7 +31,7 @@ export default function Register() {
     if (password !== confirm) { setError('As senhas não coincidem.'); return; }
     setLoading(true);
     try {
-      await registerUser({ username, password, displayName });
+      await registerUser({ username, password, displayName, poolName, poolPassword });
       navigate('/', { replace: true });
     } catch (err) {
       const code = err?.code || '';
@@ -61,6 +63,14 @@ export default function Register() {
         <div>
           <label className="text-xs font-bold text-slate uppercase tracking-wider">Confirmar senha</label>
           <input type="password" className="input mt-1" value={confirm} onChange={e => setConfirm(e.target.value)} autoComplete="new-password" required />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-slate uppercase tracking-wider">Bolão</label>
+          <input className="input mt-1" value={poolName} onChange={e => setPoolName(e.target.value)} autoComplete="off" placeholder="ex: Nassifs" required />
+        </div>
+        <div>
+          <label className="text-xs font-bold text-slate uppercase tracking-wider">Senha do bolão</label>
+          <input type="password" className="input mt-1" value={poolPassword} onChange={e => setPoolPassword(e.target.value)} autoComplete="new-password" required />
         </div>
         {error && <div className="bg-red-900/40 text-red-300 text-sm px-3 py-2 rounded-xl border border-red-700/40">{error}</div>}
         <button type="submit" disabled={loading} className="btn-primary w-full py-3 text-base">{loading ? 'Criando...' : 'Cadastrar'}</button>

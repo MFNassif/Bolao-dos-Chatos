@@ -2,19 +2,23 @@
 /**
  * CLI: atualiza placares e dispara recalculo da pontuacao.
  *
- * O workflow roda a cada 5 minutos. Antes de chamar a API esportiva,
- * verificamos se existe jogo ao vivo, jogo perto do horario, ou jogo
- * encerrado recente sem placar salvo.
+ * Estrategia 100% gratis:
+ *  - O workflow no GitHub roda a cada 5 minutos.
+ *  - Antes de chamar a API esportiva, verifica no Firestore se existe jogo
+ *    LIVE agora OU jogo SCHEDULED dentro da janela ativa.
+ *  - Se nao houver, encerra sem gastar quota da API esportiva.
+ *
+ * A janela fica aberta de 30 min antes ate 210 min depois do horario marcado.
+ * Assim o app continua buscando placar durante prorrogacao/penaltis e tambem
+ * quando a API demora para mudar scheduled -> live.
  */
 try { require('dotenv').config({ path: __dirname + '/.env' }); } catch (_) {}
 
 const { updateResults } = require('./lib/updateResults');
 const { db } = require('./lib/firebase');
 
-// GitHub Actions pode atrasar ou pular uma execucao. A janela precisa cobrir
-// o antes do jogo e algumas horas depois para nao deixar placar preso.
-const PRE_GAME_MINUTES = 60;
-const POST_GAME_MINUTES = 8 * 60;
+const PRE_GAME_MINUTES = 30;
+const SCHEDULED_AFTER_START_MINUTES = 210;
 
 async function shouldRun() {
   const firestore = db();
@@ -28,33 +32,25 @@ async function shouldRun() {
   }
 
   const now = new Date();
-  const windowStart = new Date(now.getTime() - POST_GAME_MINUTES * 60 * 1000);
-  const windowEnd = new Date(now.getTime() + PRE_GAME_MINUTES * 60 * 1000);
+  const soon = new Date(now.getTime() + PRE_GAME_MINUTES * 60 * 1000);
+  const activeStart = new Date(now.getTime() - SCHEDULED_AFTER_START_MINUTES * 60 * 1000);
 
   const schedSnap = await firestore.collection('games')
     .where('status', '==', 'scheduled')
-    .where('startTime', '>=', windowStart)
-    .where('startTime', '<=', windowEnd)
+    .where('startTime', '>=', activeStart)
+    .where('startTime', '<=', soon)
+    .orderBy('startTime', 'asc')
     .limit(1)
     .get();
+
   if (!schedSnap.empty) {
-    return { run: true, reason: 'jogo scheduled dentro da janela de atualizacao' };
+    return {
+      run: true,
+      reason: `jogo scheduled na janela ativa (${PRE_GAME_MINUTES} min antes ate ${SCHEDULED_AFTER_START_MINUTES} min depois)`
+    };
   }
 
-  const finishedSnap = await firestore.collection('games')
-    .where('status', '==', 'finished')
-    .where('startTime', '>=', windowStart)
-    .limit(20)
-    .get();
-  const hasFinishedWithoutScore = finishedSnap.docs.some((d) => {
-    const data = d.data();
-    return !Number.isInteger(data.homeScore) || !Number.isInteger(data.awayScore);
-  });
-  if (hasFinishedWithoutScore) {
-    return { run: true, reason: 'jogo finished recente sem placar salvo' };
-  }
-
-  return { run: false, reason: 'sem jogo live ou recente' };
+  return { run: false, reason: 'sem jogo live ou scheduled na janela ativa' };
 }
 
 (async () => {

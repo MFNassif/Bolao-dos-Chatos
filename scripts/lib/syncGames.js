@@ -3,14 +3,14 @@
  */
 const { admin, db } = require('./firebase');
 const { fetchFixtures, mapFixtureToGame } = require('./footballApi');
-const { recalculateGame } = require('./scoringEngine');
+const { preserveProgressIfRegression } = require('./gameUpdateGuards');
 
 async function syncGames() {
   const firestore = db();
   const start = Date.now();
   let added = 0;
   let updated = 0;
-  let recalculated = 0;
+  let unchanged = 0;
   let success = true;
   let message = '';
 
@@ -22,16 +22,13 @@ async function syncGames() {
 
     const existingSnap = await firestore.collection('games').get();
     const byExt = new Map();
-    const existingGames = [];
     existingSnap.forEach((d) => {
       const data = d.data();
-      existingGames.push({ id: d.id, data });
       if (data.externalId) byExt.set(String(data.externalId), { id: d.id, data });
     });
 
     let batch = firestore.batch();
     let ops = 0;
-    const recalcGameIds = new Set();
     async function flushIfNeeded() {
       if (ops >= 450) {
         await batch.commit();
@@ -43,120 +40,83 @@ async function syncGames() {
     for (const fx of fixtures) {
       const game = mapFixtureToGame(fx);
       if (!game.externalId) continue;
-      const existing = byExt.get(game.externalId) || findExistingGame(game, existingGames);
+      const existing = byExt.get(game.externalId);
+      const safeGame = existing ? preserveProgressIfRegression(existing.data, game) : game;
       const docId = existing ? existing.id : `ext_${game.externalId}`;
       const ref = firestore.collection('games').doc(docId);
       const payload = {
-        ...game,
+        ...safeGame,
         lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
       };
       if (existing) {
-        const cur = existing.data;
-        const statusChanged = cur.status !== game.status;
-        const scoreChanged = cur.homeScore !== game.homeScore || cur.awayScore !== game.awayScore;
-        if (
-          statusChanged ||
-          scoreChanged ||
-          game.status === 'live' ||
-          cur.status === 'live'
-        ) {
-          recalcGameIds.add(docId);
+        if (hasGameChanges(existing.data, safeGame)) {
+          batch.set(ref, payload, { merge: true });
+          updated += 1;
+          ops += 1;
+          await flushIfNeeded();
+        } else {
+          unchanged += 1;
         }
-        batch.set(ref, payload, { merge: true });
-        updated += 1;
       } else {
         batch.set(ref, {
           ...payload,
           createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
         added += 1;
+        ops += 1;
+        await flushIfNeeded();
       }
-      ops += 1;
-      await flushIfNeeded();
     }
     if (ops > 0) await batch.commit();
-    for (const gameId of recalcGameIds) {
-      await recalculateGame(gameId);
-      recalculated += 1;
-    }
-    if (!message) message = `Sincronizados ${fixtures.length} jogos. ${recalculated} recalculos disparados.`;
+    if (!message) message = `Sincronizados ${fixtures.length} jogos.`;
   } catch (err) {
     success = false;
     message = err.message || String(err);
     console.error('[syncGames] erro:', err);
   }
 
-  await writeSyncLog(firestore, {
+  await firestore.collection('syncLogs').add({
     type: 'syncGames',
     success,
     message,
     added,
     updated,
-    recalculated,
+    unchanged,
     durationMs: Date.now() - start,
     createdAt: admin.firestore.FieldValue.serverTimestamp()
   });
 
-  return { success, added, updated, recalculated, message };
+  return { success, added, updated, unchanged, message };
 }
 
 module.exports = { syncGames };
 
-async function writeSyncLog(firestore, payload) {
-  try {
-    await firestore.collection('syncLogs').add(payload);
-  } catch (err) {
-    console.warn(`[syncLogs] log ignorado: ${err.message || err}`);
-  }
+function hasGameChanges(current, next) {
+  return [
+    'externalId',
+    'homeTeam',
+    'awayTeam',
+    'homeTeamCode',
+    'awayTeamCode',
+    'homeTeamFlag',
+    'awayTeamFlag',
+    'stage',
+    'group',
+    'status',
+    'homeScore',
+    'awayScore',
+    'winner'
+  ].some((key) => normalizeValue(current?.[key]) !== normalizeValue(next?.[key])) ||
+    normalizeTime(current?.startTime) !== normalizeTime(next?.startTime);
 }
 
-function findExistingGame(game, existingGames) {
-  const targetTime = toMillis(game.startTime);
-  if (!targetTime) return null;
-
-  let best = null;
-  let bestScore = 0;
-  for (const existing of existingGames) {
-    const data = existing.data;
-    const existingTime = toMillis(data.startTime);
-    if (!existingTime || Math.abs(existingTime - targetTime) > 3 * 60 * 60 * 1000) continue;
-
-    const score =
-      sameTeam(game.homeTeamCode, game.homeTeam, data.homeTeamCode, data.homeTeam) &&
-      sameTeam(game.awayTeamCode, game.awayTeam, data.awayTeamCode, data.awayTeam)
-        ? 3
-        : 0;
-    if (score > bestScore) {
-      best = existing;
-      bestScore = score;
-    }
-  }
-  return bestScore >= 3 ? best : null;
+function normalizeValue(value) {
+  return value === undefined ? null : value;
 }
 
-function sameTeam(codeA, nameA, codeB, nameB) {
-  const aCode = normalize(codeA);
-  const bCode = normalize(codeB);
-  if (aCode && bCode && aCode === bCode) return true;
-
-  const aName = normalize(nameA);
-  const bName = normalize(nameB);
-  if (!aName || !bName) return false;
-  return aName === bName || aName.includes(bName) || bName.includes(aName);
-}
-
-function normalize(value) {
-  return String(value || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function toMillis(value) {
+function normalizeTime(value) {
   if (!value) return null;
-  if (typeof value.toMillis === 'function') return value.toMillis();
-  if (typeof value.toDate === 'function') return value.toDate().getTime();
-  const ms = new Date(value).getTime();
-  return Number.isFinite(ms) ? ms : null;
+  if (value.toDate) return value.toDate().toISOString();
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }

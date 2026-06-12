@@ -1,24 +1,23 @@
 import {
   collection,
   doc,
-  getDoc,
+  getDocs,
   onSnapshot,
   query,
   serverTimestamp,
   setDoc,
+  updateDoc,
   where
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { isLocked, LOCK_OFFSET_MS } from '../utils/locks';
-import { isFixtureReadyForPrediction } from '../utils/games';
 
 export function predictionId(gameId, userId) {
   return `${gameId}_${userId}`;
 }
 
-export async function getMyPrediction(gameId, userId) {
-  const snap = await getDoc(doc(db, 'predictions', predictionId(gameId, userId)));
-  return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+export function poolPredictionId(poolId, gameId, userId) {
+  return `${poolId}_${gameId}_${userId}`;
 }
 
 export function subscribeMyPredictions(userId, callback) {
@@ -26,20 +25,35 @@ export function subscribeMyPredictions(userId, callback) {
   return onSnapshot(q, (snap) => {
     const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     callback(items);
+  }, (err) => {
+    console.warn('Falha ao carregar meus palpites.', err);
+    callback([]);
   });
 }
 
-export function subscribePredictionsForGame(gameId, callback) {
-  const q = query(collection(db, 'predictions'), where('gameId', '==', gameId));
+export function subscribePoolPredictionsForGame(poolId, gameId, callback) {
+  if (!poolId || !gameId) {
+    callback([]);
+    return () => {};
+  }
+  const q = query(
+    collection(db, 'poolPredictions'),
+    where('poolId', '==', poolId),
+    where('gameId', '==', gameId)
+  );
   return onSnapshot(q, (snap) => {
     const items = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     callback(items);
+  }, (err) => {
+    console.warn('Falha ao carregar palpites do bolao.', err);
+    callback([]);
   });
 }
 
-export async function savePrediction({ user, profile, game, home, away }) {
+export async function savePrediction({ user, profile, game, home, away, existingPrediction = null }) {
   if (!game) throw new Error('Jogo inválido.');
-  if (!isFixtureReadyForPrediction(game)) throw new Error('Confronto ainda nao definido.');
+  if (!user?.uid) throw new Error('Usuário não autenticado.');
+  if (!profile?.username) throw new Error('Perfil ainda não carregou. Tente novamente em alguns segundos.');
   if (isLocked(game.startTime)) throw new Error('Palpite bloqueado.');
 
   const h = Number(home);
@@ -50,33 +64,108 @@ export async function savePrediction({ user, profile, game, home, away }) {
 
   const id = predictionId(game.id, user.uid);
   const ref = doc(db, 'predictions', id);
-  const existing = await getDoc(ref);
+  const pools = await getMyPoolMemberships(user.uid);
+  const displayName = profile.displayName || profile.username;
+  const updatePayload = {
+    homePrediction: h,
+    awayPrediction: a,
+    username: profile.username,
+    displayName,
+    updatedAt: serverTimestamp()
+  };
+  const createPayload = {
+    userId: user.uid,
+    username: profile.username,
+    displayName,
+    gameId: game.id,
+    homePrediction: h,
+    awayPrediction: a,
+    points: 0,
+    exactScoreHit: false,
+    resultHit: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    lockedAt: null
+  };
 
-  if (existing.exists()) {
-    await setDoc(
-      ref,
-      {
-        homePrediction: h,
-        awayPrediction: a,
-        updatedAt: serverTimestamp()
-      },
-      { merge: true }
-    );
+  if (existingPrediction?.id) {
+    await updateDoc(ref, updatePayload);
   } else {
-    await setDoc(ref, {
+    try {
+      await setDoc(ref, createPayload);
+    } catch (err) {
+      // Se a lista de palpites ainda nao carregou, o documento pode ja existir.
+      // Nesse caso, uma atualizacao pontual evita sobrescrever pontos calculados.
+      if (err?.code !== 'permission-denied' && err?.code !== 'already-exists') throw err;
+      await updateDoc(ref, updatePayload);
+    }
+  }
+
+  await syncPredictionToPools({
+    user,
+    profile,
+    game,
+    sourcePredictionId: id,
+    homePrediction: h,
+    awayPrediction: a,
+    pools
+  });
+}
+
+export async function syncMyPredictionsToPool({ user, poolId, poolName }) {
+  if (!user?.uid || !poolId) return;
+  const snap = await getDocs(query(collection(db, 'predictions'), where('userId', '==', user.uid)));
+  if (snap.empty) return;
+
+  for (const predDoc of snap.docs) {
+    const pred = predDoc.data();
+    await setDoc(doc(db, 'poolPredictions', poolPredictionId(poolId, pred.gameId, user.uid)), {
+      poolId,
+      poolName: poolName || poolId,
+      sourcePredictionId: predDoc.id,
       userId: user.uid,
-      username: profile.username,
-      displayName: profile.displayName,
-      gameId: game.id,
-      homePrediction: h,
-      awayPrediction: a,
-      points: 0,
-      exactScoreHit: false,
-      resultHit: false,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-      lockedAt: null
-    });
+      username: pred.username,
+      displayName: pred.displayName || pred.username,
+      gameId: pred.gameId,
+      homePrediction: pred.homePrediction,
+      awayPrediction: pred.awayPrediction,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+}
+
+async function getMyPoolMemberships(uid) {
+  const snap = await getDocs(query(collection(db, 'poolMembers'), where('uid', '==', uid)));
+  return snap.docs.map(d => d.data()).filter(p => p.poolId);
+}
+
+async function syncPredictionToPools({ user, profile, game, sourcePredictionId, homePrediction, awayPrediction, pools }) {
+  const displayName = profile.displayName || profile.username;
+  const activePoolId = profile.activePoolId;
+  const orderedPools = [...pools].sort((a, b) => {
+    if (a.poolId === activePoolId) return -1;
+    if (b.poolId === activePoolId) return 1;
+    return 0;
+  });
+
+  for (const pool of orderedPools) {
+    try {
+      await setDoc(doc(db, 'poolPredictions', poolPredictionId(pool.poolId, game.id, user.uid)), {
+        poolId: pool.poolId,
+        poolName: pool.poolName || pool.poolId,
+        sourcePredictionId,
+        userId: user.uid,
+        username: profile.username,
+        displayName,
+        gameId: game.id,
+        homePrediction,
+        awayPrediction,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (err) {
+      if (pool.poolId === activePoolId) throw err;
+      console.warn('Nao foi possivel sincronizar palpite em bolao secundario.', pool.poolId, err);
+    }
   }
 }
 

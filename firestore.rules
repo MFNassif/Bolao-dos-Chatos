@@ -17,8 +17,50 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    function accessId(poolId, uid) {
+      return poolId + '_' + uid;
+    }
+
+    function hasPoolMembership(poolId, uid) {
+      return exists(/databases/$(database)/documents/poolMembers/$(accessId(poolId, uid)));
+    }
+
+    function hasPoolMembershipAfter(poolId, uid) {
+      return existsAfter(/databases/$(database)/documents/poolMembers/$(accessId(poolId, uid)));
+    }
+
+    function hasPoolAccess(poolId, uid) {
+      return exists(/databases/$(database)/documents/poolAccess/$(accessId(poolId, uid))) ||
+        hasPoolMembership(poolId, uid);
+    }
+
+    function hasPoolAccessAfter(poolId, uid) {
+      return existsAfter(/databases/$(database)/documents/poolAccess/$(accessId(poolId, uid))) ||
+        hasPoolMembershipAfter(poolId, uid);
+    }
+
+    function isActivePoolMember(poolId) {
+      return isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activePoolId == poolId &&
+        hasPoolAccess(poolId, request.auth.uid);
+    }
+
+    function activePoolId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.activePoolId;
+    }
+
+    function validJoinSecret(poolId, secretId) {
+      return secretId is string &&
+        exists(/databases/$(database)/documents/poolJoinSecrets/$(secretId)) &&
+        get(/databases/$(database)/documents/poolJoinSecrets/$(secretId)).data.poolId == poolId;
+    }
+
+    function userAfter(uid) {
+      return getAfter(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
     function gameLockTime(gameId) {
-      // bloqueio é 1h antes do início (timestamp - 1h)
       return get(/databases/$(database)/documents/games/$(gameId)).data.startTime - duration.value(1, 'h');
     }
 
@@ -26,87 +68,272 @@ service cloud.firestore {
       return request.time < gameLockTime(gameId);
     }
 
-    // ===== Usuários =====
-    // Qualquer usuário logado pode ler dados básicos (necessário p/ ranking).
-    // Apenas o próprio usuário pode CRIAR seu doc, e não pode alterar pontuação/role.
+    function isValidPredictionScore(data) {
+      return data.keys().hasAll(['homePrediction', 'awayPrediction']) &&
+        data.homePrediction is int &&
+        data.awayPrediction is int &&
+        data.homePrediction >= 0 &&
+        data.awayPrediction >= 0 &&
+        data.homePrediction <= 30 &&
+        data.awayPrediction <= 30;
+    }
+
+    function isPredictionOwnerById(predictionId, data) {
+      return data.keys().hasAll(['gameId', 'userId']) &&
+        data.gameId is string &&
+        data.userId is string &&
+        data.userId == request.auth.uid &&
+        predictionId == data.gameId + '_' + request.auth.uid;
+    }
+
+    function validPoolPredictionId(poolPredictionId, data) {
+      return data.keys().hasAll(['poolId', 'gameId', 'userId', 'sourcePredictionId']) &&
+        data.poolId is string &&
+        data.gameId is string &&
+        data.userId is string &&
+        data.userId == request.auth.uid &&
+        data.sourcePredictionId == data.gameId + '_' + request.auth.uid &&
+        poolPredictionId == data.poolId + '_' + data.gameId + '_' + request.auth.uid;
+    }
+
+    function sourcePredictionMatches(data) {
+      let source = get(/databases/$(database)/documents/predictions/$(data.sourcePredictionId)).data;
+      return source.userId == request.auth.uid &&
+        source.gameId == data.gameId &&
+        source.homePrediction == data.homePrediction &&
+        source.awayPrediction == data.awayPrediction;
+    }
+
+    // ===== Usuarios =====
     match /users/{uid} {
-      allow read: if isSignedIn();
+      allow read: if isSelf(uid) || isAdmin();
 
       allow create: if isSelf(uid) &&
+        request.resource.data.keys().hasOnly([
+          'uid', 'username', 'displayName', 'role',
+          'totalPoints', 'exactScores', 'correctResults',
+          'predictionsCount', 'activePoolId', 'activePoolName',
+          'lastPoolAccessAt', 'createdAt'
+        ]) &&
         request.resource.data.uid == uid &&
         request.resource.data.role == 'user' &&
         request.resource.data.totalPoints == 0 &&
         request.resource.data.exactScores == 0 &&
         request.resource.data.correctResults == 0 &&
-        request.resource.data.predictionsCount == 0;
+        request.resource.data.predictionsCount == 0 &&
+        request.resource.data.activePoolId is string &&
+        request.resource.data.activePoolName is string &&
+        hasPoolAccessAfter(request.resource.data.activePoolId, uid);
 
-      // Usuário comum só altera displayName. Nunca toca em pontuação ou role.
       allow update: if isSelf(uid) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'displayName', 'updatedAt'
+        ]) &&
         request.resource.data.uid == resource.data.uid &&
         request.resource.data.username == resource.data.username &&
         request.resource.data.role == resource.data.role &&
         request.resource.data.totalPoints == resource.data.totalPoints &&
         request.resource.data.exactScores == resource.data.exactScores &&
         request.resource.data.correctResults == resource.data.correctResults &&
+        request.resource.data.predictionsCount == resource.data.predictionsCount &&
+        request.resource.data.activePoolId == resource.data.activePoolId &&
+        request.resource.data.activePoolName == resource.data.activePoolName;
+
+      allow update: if isSelf(uid) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'activePoolId', 'activePoolName', 'lastPoolAccessAt', 'updatedAt'
+        ]) &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.username == resource.data.username &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.totalPoints == resource.data.totalPoints &&
+        request.resource.data.exactScores == resource.data.exactScores &&
+        request.resource.data.correctResults == resource.data.correctResults &&
+        request.resource.data.predictionsCount == resource.data.predictionsCount &&
+        request.resource.data.activePoolId is string &&
+        request.resource.data.activePoolName is string &&
+        hasPoolAccessAfter(request.resource.data.activePoolId, uid);
+
+      allow update, delete: if isAdmin();
+    }
+
+    // ===== Boloes =====
+    match /pools/{poolId} {
+      allow read: if isAdmin() || isActivePoolMember(poolId) || (isSignedIn() && hasPoolAccess(poolId, request.auth.uid));
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /poolJoinSecrets/{secretId} {
+      allow read: if false;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /poolAccess/{accessDocId} {
+      // O id e sempre {poolId}_{uid}; o sufixo identifica o dono mesmo
+      // quando o documento ainda nao existe (evita permission-denied no get).
+      allow get: if isAdmin() ||
+        (isSignedIn() && accessDocId.matches('.*_' + request.auth.uid));
+      allow list: if isAdmin();
+
+      allow create, update: if isSignedIn() &&
+        request.resource.data.keys().hasOnly(['poolId', 'uid', 'joinSecretId', 'updatedAt']) &&
+        request.resource.data.poolId is string &&
+        request.resource.data.uid == request.auth.uid &&
+        accessDocId == accessId(request.resource.data.poolId, request.auth.uid) &&
+        validJoinSecret(request.resource.data.poolId, request.resource.data.joinSecretId);
+
+      allow delete: if isAdmin();
+    }
+
+    match /poolMembers/{memberDocId} {
+      // O id e sempre {poolId}_{uid}; o sufixo identifica o dono mesmo
+      // quando o documento ainda nao existe (evita permission-denied no get).
+      allow get: if isAdmin() ||
+        (isSignedIn() && memberDocId.matches('.*_' + request.auth.uid)) ||
+        (isSignedIn() && resource != null && isActivePoolMember(resource.data.poolId));
+
+      allow list: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.uid == request.auth.uid
+      ) || (
+        isSignedIn() &&
+        resource.data.poolId == activePoolId() &&
+        hasPoolAccess(resource.data.poolId, request.auth.uid)
+      );
+
+      allow create: if isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'poolId', 'poolName', 'uid', 'username', 'displayName', 'role',
+          'totalPoints', 'exactScores', 'correctResults', 'predictionsCount',
+          'joinedAt', 'updatedAt'
+        ]) &&
+        request.resource.data.poolId is string &&
+        request.resource.data.poolName is string &&
+        request.resource.data.uid == request.auth.uid &&
+        memberDocId == accessId(request.resource.data.poolId, request.auth.uid) &&
+        hasPoolAccessAfter(request.resource.data.poolId, request.auth.uid) &&
+        request.resource.data.username == userAfter(request.auth.uid).username &&
+        request.resource.data.displayName == userAfter(request.auth.uid).displayName &&
+        request.resource.data.role == userAfter(request.auth.uid).role &&
+        request.resource.data.totalPoints == 0 &&
+        request.resource.data.exactScores == 0 &&
+        request.resource.data.correctResults == 0 &&
+        request.resource.data.predictionsCount == 0;
+
+      allow update: if isSignedIn() &&
+        resource.data.uid == request.auth.uid &&
+        memberDocId == accessId(resource.data.poolId, request.auth.uid) &&
+        request.resource.data.poolId == resource.data.poolId &&
+        request.resource.data.uid == resource.data.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'poolName', 'username', 'displayName', 'role', 'updatedAt'
+        ]) &&
+        hasPoolAccessAfter(resource.data.poolId, request.auth.uid) &&
+        request.resource.data.username == userAfter(request.auth.uid).username &&
+        request.resource.data.displayName == userAfter(request.auth.uid).displayName &&
+        request.resource.data.role == userAfter(request.auth.uid).role &&
+        request.resource.data.totalPoints == resource.data.totalPoints &&
+        request.resource.data.exactScores == resource.data.exactScores &&
+        request.resource.data.correctResults == resource.data.correctResults &&
         request.resource.data.predictionsCount == resource.data.predictionsCount;
 
-      // Admin pode tudo
       allow update, delete: if isAdmin();
     }
 
     // ===== Reserva de usernames =====
     match /usernames/{username} {
-      allow read: if true; // checar disponibilidade antes do login
+      allow read: if true;
       allow create: if isSignedIn() &&
+        request.resource.data.keys().hasOnly(['uid', 'createdAt']) &&
         request.resource.data.uid == request.auth.uid;
       allow delete, update: if isAdmin();
     }
 
     // ===== Jogos =====
-    // Todo usuário logado pode ler. Apenas admin e Cloud Functions (admin SDK) escrevem.
     match /games/{gameId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
 
     // ===== Palpites =====
-    // Documento: predictions/{gameId_userId}
     match /predictions/{predictionId} {
-      // Leitura liberada para usuarios logados para calcular medias gerais.
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
 
-      // Criação: só o próprio usuário, antes do bloqueio.
       allow create: if isSignedIn() &&
-        request.resource.data.userId == request.auth.uid &&
-        request.resource.data.gameId is string &&
-        request.resource.data.homePrediction is int &&
-        request.resource.data.awayPrediction is int &&
-        request.resource.data.homePrediction >= 0 &&
-        request.resource.data.awayPrediction >= 0 &&
-        request.resource.data.homePrediction <= 30 &&
-        request.resource.data.awayPrediction <= 30 &&
+        request.resource.data.keys().hasAll([
+          'userId', 'username', 'displayName', 'gameId',
+          'homePrediction', 'awayPrediction', 'points',
+          'exactScoreHit', 'resultHit', 'createdAt', 'updatedAt', 'lockedAt'
+        ]) &&
+        request.resource.data.keys().hasOnly([
+          'userId', 'username', 'displayName', 'gameId',
+          'homePrediction', 'awayPrediction', 'points',
+          'exactScoreHit', 'resultHit', 'createdAt', 'updatedAt', 'lockedAt'
+        ]) &&
+        isPredictionOwnerById(predictionId, request.resource.data) &&
+        request.resource.data.username == userAfter(request.auth.uid).username &&
+        request.resource.data.displayName == userAfter(request.auth.uid).displayName &&
+        isValidPredictionScore(request.resource.data) &&
         request.resource.data.points == 0 &&
+        request.resource.data.exactScoreHit == false &&
+        request.resource.data.resultHit == false &&
+        request.resource.data.lockedAt == null &&
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.updatedAt == request.time &&
         isBeforeLock(request.resource.data.gameId);
 
-      // Atualização: só o próprio usuário, antes do bloqueio, sem mexer em points.
       allow update: if isSignedIn() &&
         resource.data.userId == request.auth.uid &&
+        isPredictionOwnerById(predictionId, resource.data) &&
         request.resource.data.userId == resource.data.userId &&
         request.resource.data.gameId == resource.data.gameId &&
-        request.resource.data.points == resource.data.points &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'homePrediction', 'awayPrediction', 'username', 'displayName', 'updatedAt'
+        ]) &&
+        request.resource.data.username == userAfter(request.auth.uid).username &&
+        request.resource.data.displayName == userAfter(request.auth.uid).displayName &&
+        isValidPredictionScore(request.resource.data) &&
+        request.resource.data.updatedAt == request.time &&
         isBeforeLock(resource.data.gameId);
 
-      // Admin pode atualizar tudo (recálculo, correções)
       allow update, delete: if isAdmin();
     }
 
-    // ===== Configurações do app =====
+    // ===== Palpites visiveis por bolao =====
+    match /poolPredictions/{poolPredictionId} {
+      allow get, list: if isAdmin() || (
+        isSignedIn() &&
+        resource.data.poolId == activePoolId() &&
+        hasPoolAccess(resource.data.poolId, request.auth.uid)
+      );
+
+      allow create, update: if isSignedIn() &&
+        request.resource.data.keys().hasOnly([
+          'poolId', 'poolName', 'sourcePredictionId',
+          'userId', 'username', 'displayName', 'gameId',
+          'homePrediction', 'awayPrediction', 'updatedAt'
+        ]) &&
+        validPoolPredictionId(poolPredictionId, request.resource.data) &&
+        request.resource.data.poolName is string &&
+        request.resource.data.username is string &&
+        request.resource.data.displayName is string &&
+        request.resource.data.username == userAfter(request.auth.uid).username &&
+        request.resource.data.displayName == userAfter(request.auth.uid).displayName &&
+        isValidPredictionScore(request.resource.data) &&
+        hasPoolAccessAfter(request.resource.data.poolId, request.auth.uid) &&
+        request.resource.data.updatedAt == request.time &&
+        sourcePredictionMatches(request.resource.data);
+
+      allow delete: if isAdmin();
+    }
+
+    // ===== Configuracoes do app =====
     match /settings/{docId} {
       allow read: if isSignedIn();
       allow write: if isAdmin();
     }
 
-    // ===== Logs de sincronização =====
+    // ===== Logs de sincronizacao =====
     match /syncLogs/{logId} {
       allow read: if isAdmin();
       allow write: if isAdmin();

@@ -41,10 +41,13 @@ export default function Login() {
         setError('Usuário ou senha incorretos.');
       } else if (code.includes('too-many-requests')) {
         setError('Muitas tentativas. Tente em alguns minutos.');
+      } else if (code.includes('network-request-failed')) {
+        setError('Sem conexão. Verifique sua internet e tente de novo.');
       } else {
         setError(err.message || 'Erro ao entrar.');
       }
-    } finally { setLoading(false); }
+      setLoading(false);
+    }
   }
 
   return (

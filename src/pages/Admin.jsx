@@ -1,21 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDocs, limit, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { subscribeGames } from '../services/gameService';
-import { setGameResult, recalculateAllScores, setUserRole, deleteUserAccount } from '../services/adminService';
-import { subscribeSettings, saveSettings, DEFAULT_SETTINGS } from '../services/settingsService';
+import { setGameResult, recalculatePoolScores, setUserRole, removeUserFromPool } from '../services/adminService';
+import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, savePoolSettings } from '../services/settingsService';
+import { createPool, getPoolMembers, getPoolsForAdmin, joinPoolWithPassword } from '../services/poolService';
 import { useAuth } from '../routes/AuthContext';
 import { formatDateTime } from '../utils/dates';
 import Loading from '../components/Loading';
 
 const TABS = [
   { key: 'settings', label: '⚙ Config' },
+  { key: 'pools',    label: '🏆 Bolões' },
   { key: 'games',    label: '⚽ Jogos' },
   { key: 'users',    label: '👥 Usuários' },
   { key: 'logs',     label: '📋 Logs' }
 ];
 
 export default function Admin() {
+  const { user, profile } = useAuth();
   const [tab, setTab] = useState('settings');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -37,15 +40,15 @@ export default function Admin() {
     <div className="space-y-4">
       <div>
         <h2 className="font-display text-2xl text-white tracking-wider">ADMIN</h2>
-        <p className="text-sm text-slate">Configurações, jogos, usuários e logs.</p>
+        <p className="text-sm text-slate">Configurações, bolões, jogos, usuários e logs.</p>
       </div>
 
       {/* Ações rápidas */}
       <div className="card bg-surface-2 p-4 space-y-3">
         <h3 className="text-[11px] text-slate font-bold uppercase tracking-wider">Ações rápidas</h3>
         <div className="flex flex-wrap gap-2">
-          <button disabled={busy} className="btn-gold" onClick={() => run('Recalcular', async () => {
-            const r = await recalculateAllScores();
+          <button disabled={busy || !profile?.activePoolId} className="btn-gold" onClick={() => run('Recalcular', async () => {
+            const r = await recalculatePoolScores(profile.activePoolId);
             return { message: `Recálculo: ${r.predictions} palpites · ${r.users} usuários.` };
           })}>
             Recalcular pontuação
@@ -68,26 +71,30 @@ export default function Admin() {
         ))}
       </div>
 
-      {tab === 'settings' && <SettingsAdmin busy={busy} onRun={run} />}
+      {tab === 'settings' && <SettingsAdmin busy={busy} onRun={run} activePoolId={profile?.activePoolId} activePoolName={profile?.activePoolName} />}
+      {tab === 'pools'    && <PoolsAdmin busy={busy} onRun={run} user={user} profile={profile} />}
       {tab === 'games'    && <GamesAdmin busy={busy} onRun={run} />}
-      {tab === 'users'    && <UsersAdmin busy={busy} onRun={run} />}
+      {tab === 'users'    && <UsersAdmin busy={busy} onRun={run} activePoolId={profile?.activePoolId} currentUid={user?.uid} />}
       {tab === 'logs'     && <LogsAdmin />}
     </div>
   );
 }
 
 // ─── Settings ────────────────────────────────────────────────────────────────
-function SettingsAdmin({ busy, onRun }) {
+function SettingsAdmin({ busy, onRun, activePoolId, activePoolName }) {
   const [settings, setSettings] = useState(null);
   const [form, setForm] = useState(null);
 
   useEffect(() => {
-    const unsub = subscribeSettings(s => {
+    if (!activePoolId) return;
+    setSettings(null);
+    setForm(null);
+    const unsub = subscribePoolSettings(activePoolId, s => {
       setSettings(s);
-      setForm(prev => prev || s);
+      setForm(s);
     });
     return unsub;
-  }, []);
+  }, [activePoolId]);
 
   if (!form) return <Loading />;
 
@@ -95,8 +102,14 @@ function SettingsAdmin({ busy, onRun }) {
 
   async function handleSave() {
     await onRun('Salvar configurações', async () => {
-      await saveSettings(form);
-      return { message: 'Configurações salvas!' };
+      const prizeTotal = (form.prize1 || 0) + (form.prize2 || 0) + (form.prize3 || 0);
+      if (prizeTotal !== 100) throw new Error(`A soma dos premios precisa ser 100%. Atual: ${prizeTotal}%.`);
+      const scoringChanged =
+        Number(form.exactScorePoints) !== Number(settings?.exactScorePoints ?? DEFAULT_POOL_SETTINGS.exactScorePoints) ||
+        Number(form.correctResultPoints) !== Number(settings?.correctResultPoints ?? DEFAULT_POOL_SETTINGS.correctResultPoints);
+      await savePoolSettings(activePoolId, form);
+      if (scoringChanged) await recalculatePoolScores(activePoolId);
+      return { message: scoringChanged ? 'Configurações salvas e pontuação recalculada!' : 'Configurações salvas!' };
     });
   }
 
@@ -111,6 +124,7 @@ function SettingsAdmin({ busy, onRun }) {
     <div className="space-y-4">
       <div className="card bg-surface-2 p-4 space-y-4">
         <h3 className="font-display text-base text-white tracking-wider">💰 CONFIGURAÇÕES DO BOLÃO</h3>
+        <p className="text-xs text-slate">Editando: <span className="text-white font-semibold">{activePoolName || activePoolId}</span></p>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -148,6 +162,35 @@ function SettingsAdmin({ busy, onRun }) {
           )}
         </div>
 
+        <div>
+          <p className="text-[11px] text-slate font-bold uppercase tracking-wider mb-2">Pontuacao</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] font-bold text-yellow-400 block mb-1">Placar exato</label>
+              <input
+                type="number"
+                className="input !py-2"
+                min="0"
+                step="1"
+                value={form.exactScorePoints}
+                onChange={e => set('exactScorePoints', Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-green-light block mb-1">Resultado certo</label>
+              <input
+                type="number"
+                className="input !py-2"
+                min="0"
+                step="1"
+                value={form.correctResultPoints}
+                onChange={e => set('correctResultPoints', Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate mt-1">Ao alterar a pontuacao, o ranking dos membros desse bolao e recalculado.</p>
+        </div>
+
         {/* Preview */}
         <div className="bg-white/5 rounded-xl p-3">
           <p className="text-[11px] text-slate mb-2">Preview com 10 participantes:</p>
@@ -168,6 +211,74 @@ function SettingsAdmin({ busy, onRun }) {
 }
 
 // ─── Games ────────────────────────────────────────────────────────────────────
+function PoolsAdmin({ busy, onRun, user, profile }) {
+  const [pools, setPools] = useState(null);
+  const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    getPoolsForAdmin()
+      .then(list => { if (!cancelled) setPools(list); })
+      .catch(() => { if (!cancelled) setPools([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    await onRun('Criar bolao', async () => {
+      const created = await createPool({ name, password, admin: user });
+      await joinPoolWithPassword({ user, profile, poolName: name, password });
+      setPools(list => [...(list || []), { id: created.poolId, poolId: created.poolId, name: created.name }].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+      setName('');
+      setPassword('');
+      return { message: `Bolao ${created.name} criado. Voce tambem entrou nele.` };
+    });
+  }
+
+  if (pools === null) return <Loading />;
+
+  return (
+    <div className="space-y-4">
+      <form onSubmit={handleCreate} className="card bg-surface-2 p-4 space-y-4">
+        <div>
+          <h3 className="font-display text-base text-white tracking-wider">CRIAR BOLAO</h3>
+          <p className="text-xs text-slate mt-1">Nome e senha nao aparecem publicamente.</p>
+        </div>
+        <div>
+          <label className="text-[11px] text-slate font-bold uppercase tracking-wider block mb-1">Nome</label>
+          <input className="input" value={name} onChange={e => setName(e.target.value)} placeholder="ex: Amigos da firma" required />
+        </div>
+        <div>
+          <label className="text-[11px] text-slate font-bold uppercase tracking-wider block mb-1">Senha</label>
+          <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} minLength={6} required />
+        </div>
+        <button className="btn-primary w-full" disabled={busy} type="submit">
+          Criar bolao
+        </button>
+      </form>
+
+      <div className="card overflow-hidden">
+        <div className="px-4 py-3 bg-surface-2 border-b border-white/8">
+          <h3 className="text-xs font-bold text-slate uppercase tracking-wider">{pools.length} bolao{pools.length !== 1 ? 'es' : ''}</h3>
+        </div>
+        {pools.length === 0 ? (
+          <div className="p-8 text-center text-slate text-sm">Nenhum bolao criado.</div>
+        ) : (
+          <ul>
+            {pools.map(pool => (
+              <li key={pool.id} className="px-4 py-3 border-b border-white/5 last:border-0">
+                <p className="font-semibold text-white text-sm">{pool.name}</p>
+                <p className="text-[11px] text-slate">id: {pool.id}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function GamesAdmin({ busy, onRun }) {
   const [games, setGames] = useState(null);
   useEffect(() => subscribeGames(setGames), []);
@@ -239,17 +350,19 @@ function GameRow({ game, busy, onRun }) {
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-function UsersAdmin({ busy, onRun }) {
-  const { user } = useAuth();
+function UsersAdmin({ busy, onRun, activePoolId, currentUid }) {
   const [users, setUsers] = useState(null);
   const [q, setQ] = useState('');
 
   useEffect(() => {
-    (async () => {
-      const snap = await getDocs(query(collection(db, 'users'), orderBy('totalPoints', 'desc'), limit(200)));
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    })();
-  }, []);
+    if (!activePoolId) return;
+    let cancelled = false;
+    setUsers(null);
+    getPoolMembers(activePoolId)
+      .then(list => { if (!cancelled) setUsers(list); })
+      .catch(() => { if (!cancelled) setUsers([]); });
+    return () => { cancelled = true; };
+  }, [activePoolId]);
 
   const filtered = useMemo(() => {
     if (!users) return [];
@@ -259,22 +372,6 @@ function UsersAdmin({ busy, onRun }) {
   }, [users, q]);
 
   if (users === null) return <Loading />;
-
-  async function removeUser(u) {
-    const uid = u.uid || u.id;
-    if (uid === user.uid) {
-      alert('Nao da para excluir sua propria conta por aqui.');
-      return;
-    }
-    if (!confirm(`Excluir a conta de ${u.displayName}? Isso apaga perfil, username e todos os palpites do bolao.`)) return;
-    if (!confirm('Tem certeza? Essa acao nao pode ser desfeita pelo app.')) return;
-
-    await onRun('Excluir conta', async () => {
-      const result = await deleteUserAccount({ uid, username: u.username });
-      setUsers(list => list.filter(x => (x.uid || x.id) !== uid));
-      return { message: `${u.displayName} excluido. ${result.predictions} palpites removidos.` };
-    });
-  }
 
   async function toggleRole(u) {
     const newRole = u.role === 'admin' ? 'user' : 'admin';
@@ -286,24 +383,42 @@ function UsersAdmin({ busy, onRun }) {
     });
   }
 
+  async function removeMember(u) {
+    if (u.uid === currentUid) return;
+    if (!confirm(`Remover ${u.displayName} deste bolao? Ele perdera acesso aos participantes, ranking e palpites deste grupo.`)) return;
+    await onRun('Remover usuario', async () => {
+      const result = await removeUserFromPool({ uid: u.uid, poolId: activePoolId, currentUid });
+      setUsers(list => list.filter(x => x.uid !== u.uid));
+      return { message: `${u.displayName} removido do bolao. ${result.removedPredictions} palpite(s) deixaram de aparecer no grupo.` };
+    });
+  }
+
   return (
     <div className="space-y-3">
       <input className="input" placeholder="Buscar usuário..." value={q} onChange={e => setQ(e.target.value)} />
+      <p className="text-xs text-slate">Mostrando membros do bolão ativo.</p>
       <div className="card overflow-hidden">
         <ul>
           {filtered.map(u => (
-            <li key={u.uid} className="px-4 py-3 border-b border-white/5 last:border-0 flex items-center gap-3">
+            <li key={u.uid} className="px-4 py-3 border-b border-white/5 last:border-0 flex flex-wrap items-center gap-3">
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-white truncate text-sm">{u.displayName}</p>
                 <p className="text-[11px] text-slate">@{u.username} · {u.totalPoints || 0} pts</p>
               </div>
-              <span className={`chip ${u.role === 'admin' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/8 text-slate'}`}>{u.role}</span>
-              <button className="btn-ghost text-xs" disabled={busy} onClick={() => toggleRole(u)}>
-                {u.role === 'admin' ? 'Tornar user' : 'Tornar admin'}
-              </button>
-              <button className="btn-danger text-xs" disabled={busy || (u.uid || u.id) === user.uid} onClick={() => removeUser(u)}>
-                Excluir
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`chip ${u.role === 'admin' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/8 text-slate'}`}>{u.role}</span>
+                <button className="btn-ghost text-xs px-3 py-2" disabled={busy} onClick={() => toggleRole(u)}>
+                  {u.role === 'admin' ? 'Tornar user' : 'Tornar admin'}
+                </button>
+                <button
+                  className="btn-danger text-xs px-3 py-2"
+                  disabled={busy || u.uid === currentUid}
+                  title={u.uid === currentUid ? 'Voce nao pode remover a si mesmo' : 'Remover deste bolao'}
+                  onClick={() => removeMember(u)}
+                >
+                  Remover
+                </button>
+              </div>
             </li>
           ))}
         </ul>

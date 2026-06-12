@@ -1,5 +1,5 @@
 /**
- * Modo Bella — traduz siglas e nomes de seleções para português completo.
+ * Modo Diva — traduz siglas e nomes de seleções para português completo.
  * Fonte: nomes oficiais em português utilizados pela CBF e mídia brasileira.
  */
 

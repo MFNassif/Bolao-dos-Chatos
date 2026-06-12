@@ -1,6 +1,10 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { browserLocalPersistence, getAuth, setPersistence } from 'firebase/auth';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -13,7 +17,16 @@ const firebaseConfig = {
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+// Cache persistente (IndexedDB): listeners reabertos pagam leitura apenas dos
+// documentos que mudaram, em vez de reler tudo a cada navegacao — essencial
+// para caber no limite gratuito do Firestore.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+});
+export const authPersistenceReady = setPersistence(auth, browserLocalPersistence)
+  .catch((err) => {
+    console.warn('Nao foi possivel configurar persistencia local do Auth.', err);
+  });
 
 export const AUTH_EMAIL_DOMAIN =
   import.meta.env.VITE_AUTH_EMAIL_DOMAIN || 'bolao.local';

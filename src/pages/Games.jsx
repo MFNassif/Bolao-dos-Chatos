@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../routes/AuthContext';
 import { subscribeGames } from '../services/gameService';
 import { subscribeMyPredictions } from '../services/predictionService';
+import { subscribePoolSettings } from '../services/settingsService';
 import { dayKey, dayLabel, toMillis } from '../utils/dates';
-import { groupSortValue } from '../utils/games';
 import GameCard from '../components/GameCard';
 import PredictionForm from '../components/PredictionForm';
 import Loading from '../components/Loading';
@@ -17,22 +17,33 @@ const STATUS_FILTERS = [
 ];
 
 export default function Games() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [games, setGames]   = useState(null);
-  const [preds, setPreds]   = useState([]);
+  const [preds, setPreds]   = useState(null);
+  const [settings, setSettings] = useState(null);
   const [filter, setFilter] = useState('all');
   const [view, setView]     = useState('group');      // 'group' | 'chrono'
   const [activeGroup, setActiveGroup] = useState(null);
 
   useEffect(() => {
+    setPreds(null);
     const u1 = subscribeGames(setGames);
     const u2 = subscribeMyPredictions(user.uid, setPreds);
     return () => { u1(); u2(); };
   }, [user.uid]);
 
+  useEffect(() => {
+    if (!profile?.activePoolId) {
+      setSettings(null);
+      return;
+    }
+    const unsub = subscribePoolSettings(profile.activePoolId, setSettings);
+    return unsub;
+  }, [profile?.activePoolId]);
+
   const predMap = useMemo(() => {
     const m = new Map();
-    preds.forEach(p => m.set(p.gameId, p));
+    (preds || []).forEach(p => m.set(p.gameId, p));
     return m;
   }, [preds]);
 
@@ -68,9 +79,7 @@ export default function Games() {
       if (!map.has(grp)) map.set(grp, []);
       map.get(grp).push(g);
     });
-    return Array.from(map.entries()).sort(([a], [b]) =>
-      groupSortValue(a) - groupSortValue(b) || String(a).localeCompare(String(b))
-    );
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [filtered, activeGroup]);
 
   /* agrupado por data (view === 'chrono') */
@@ -89,13 +98,13 @@ export default function Games() {
     const now = Date.now();
     return {
       total:    games.length,
-      feitos:   preds.length,
+      feitos:   preds?.length || 0,
       live:     games.filter(g => g.status === 'live').length,
       proximos: games.filter(g => toMillis(g.startTime) > now && g.status !== 'finished').length
     };
   }, [games, preds]);
 
-  if (games === null) return <Loading />;
+  if (games === null || preds === null) return <Loading />;
 
   return (
     <div className="space-y-4">
@@ -168,7 +177,7 @@ export default function Games() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {list.map(game => (
                     <GameCard key={game.id} game={game}>
-                      <PredictionForm game={game} prediction={predMap.get(game.id)} />
+                      <PredictionForm game={game} prediction={predMap.get(game.id)} settings={settings} />
                     </GameCard>
                   ))}
                 </div>
@@ -185,7 +194,7 @@ export default function Games() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {items.map(game => (
                     <GameCard key={game.id} game={game}>
-                      <PredictionForm game={game} prediction={predMap.get(game.id)} />
+                      <PredictionForm game={game} prediction={predMap.get(game.id)} settings={settings} />
                     </GameCard>
                   ))}
                 </div>

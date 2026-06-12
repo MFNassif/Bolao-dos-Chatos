@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../routes/AuthContext';
 import { subscribeRanking } from '../services/rankingService';
 import { subscribeLiveGames } from '../services/gameService';
-import { subscribeSettings, calcPrizes } from '../services/settingsService';
+import { subscribePoolSettings, calcPrizes } from '../services/settingsService';
 import RankingTable from '../components/RankingTable';
 import Loading from '../components/Loading';
 
@@ -15,18 +15,30 @@ const SORTS = [
 export default function Ranking() {
   const { user, profile } = useAuth();
   const [rows, setRows] = useState(null);
-  const [games, setGames] = useState([]);
+  const [liveGames, setLiveGames] = useState([]);
   const [settings, setSettings] = useState(null);
   const [sortBy, setSortBy] = useState('points');
 
   useEffect(() => {
-    const u1 = subscribeRanking(setRows);
-    const u2 = subscribeLiveGames(setGames);
-    const u3 = subscribeSettings(setSettings);
-    return () => { u1(); u2(); u3(); };
+    return subscribeLiveGames(setLiveGames);
   }, []);
 
-  const liveGames = useMemo(() => games.filter(g => g.status === 'live'), [games]);
+  useEffect(() => {
+    if (!profile?.activePoolId) {
+      setSettings(null);
+      return;
+    }
+    const unsub = subscribePoolSettings(profile.activePoolId, setSettings);
+    return unsub;
+  }, [profile?.activePoolId]);
+
+  useEffect(() => {
+    if (!profile?.activePoolId) return;
+    setRows(null);
+    const unsub = subscribeRanking(profile.activePoolId, setRows);
+    return unsub;
+  }, [profile?.activePoolId]);
+
   const isLive = liveGames.length > 0;
   const prizes = settings && rows ? calcPrizes(settings, rows.length) : null;
 
@@ -34,6 +46,7 @@ export default function Ranking() {
 
   const top3 = [...rows].sort((a, b) => (b.totalPoints || 0) - (a.totalPoints || 0)).slice(0, 3);
   const myPos = rows.findIndex(u => u.uid === user.uid) + 1;
+  const myRow = rows.find(u => u.uid === user.uid);
 
   return (
     <div className="space-y-4">
@@ -137,10 +150,10 @@ export default function Ranking() {
               <p className="text-sm text-slate">{profile.displayName}</p>
             </div>
             <div className="text-right space-y-1">
-              <p className="font-display text-3xl text-green-light">{profile.totalPoints || 0} <span className="text-base text-slate">pts</span></p>
+              <p className="font-display text-3xl text-green-light">{myRow?.totalPoints || 0} <span className="text-base text-slate">pts</span></p>
               <div className="flex gap-3 justify-end text-xs">
-                <span className="text-yellow-400 font-bold">🎯 {profile.exactScores || 0} cravadas</span>
-                <span className="text-white/60">✓ {profile.correctResults || 0} acertos</span>
+                <span className="text-yellow-400 font-bold">🎯 {myRow?.exactScores || 0} cravadas</span>
+                <span className="text-white/60">✓ {myRow?.correctResults || 0} acertos</span>
               </div>
             </div>
           </div>

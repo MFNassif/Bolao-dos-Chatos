@@ -31,6 +31,23 @@
         { "fieldPath": "totalPoints", "order": "DESCENDING" },
         { "fieldPath": "exactScores", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "poolMembers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "poolId", "order": "ASCENDING" },
+        { "fieldPath": "totalPoints", "order": "DESCENDING" },
+        { "fieldPath": "exactScores", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "poolPredictions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "poolId", "order": "ASCENDING" },
+        { "fieldPath": "gameId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

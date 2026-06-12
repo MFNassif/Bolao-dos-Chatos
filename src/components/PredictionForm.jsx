@@ -2,13 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { isLocked } from '../utils/locks';
 import { savePrediction } from '../services/predictionService';
 import { scorePrediction } from '../utils/scoring';
-import { isFixtureReadyForPrediction } from '../utils/games';
 import { useAuth } from '../routes/AuthContext';
 
-export default function PredictionForm({ game, prediction }) {
+export default function PredictionForm({ game, prediction, settings }) {
   const { user, profile } = useAuth();
   const locked = isLocked(game.startTime);
-  const fixtureReady = isFixtureReadyForPrediction(game);
   const [home, setHome] = useState(prediction?.homePrediction ?? '');
   const [away, setAway] = useState(prediction?.awayPrediction ?? '');
   const [saving, setSaving] = useState(false);
@@ -25,26 +23,30 @@ export default function PredictionForm({ game, prediction }) {
     if (game.status === 'scheduled') return null;
     return scorePrediction(
       { home: prediction.homePrediction, away: prediction.awayPrediction },
-      { home: game.homeScore, away: game.awayScore }
+      { home: game.homeScore, away: game.awayScore },
+      settings
     );
-  }, [prediction, game.homeScore, game.awayScore, game.status]);
+  }, [prediction, game.homeScore, game.awayScore, game.status, settings]);
 
   function onlyDigits(v) { return v.replace(/\D+/g, '').slice(0, 2); }
 
   async function handleSubmit(e) {
     e.preventDefault();
     setMsg(null);
-    if (!fixtureReady) {
-      setMsg({ type: 'error', text: 'Confronto ainda nao definido.' });
-      return;
-    }
     if (home === '' || away === '') {
       setMsg({ type: 'error', text: 'Informe os dois placares.' });
       return;
     }
     setSaving(true);
     try {
-      await savePrediction({ user, profile, game, home: Number(home), away: Number(away) });
+      await savePrediction({
+        user,
+        profile,
+        game,
+        home: Number(home),
+        away: Number(away),
+        existingPrediction: prediction
+      });
       setMsg({ type: 'success', text: 'Salvo!' });
     } catch (err) {
       setMsg({ type: 'error', text: err.message || 'Erro.' });
@@ -52,15 +54,6 @@ export default function PredictionForm({ game, prediction }) {
       setSaving(false);
       setTimeout(() => setMsg(null), 2500);
     }
-  }
-
-  if (!fixtureReady) {
-    return (
-      <div className="flex flex-col items-center gap-1.5 text-center">
-        <span className="chip bg-white/8 text-slate">aguardando confronto</span>
-        <span className="text-[11px] text-slate">Palpite liberado quando os times forem definidos.</span>
-      </div>
-    );
   }
 
   /* Bloqueado / encerrado */
@@ -75,7 +68,7 @@ export default function PredictionForm({ game, prediction }) {
               <span className="w-9 h-9 rounded-xl bg-white/8 border border-white/10 flex items-center justify-center font-display text-xl text-white">
                 {prediction.homePrediction}
               </span>
-              <span className="font-display text-base text-slate">×</span>
+              <span className="w-4 text-center font-display text-base text-slate">×</span>
               <span className="w-9 h-9 rounded-xl bg-white/8 border border-white/10 flex items-center justify-center font-display text-xl text-white">
                 {prediction.awayPrediction}
               </span>
@@ -110,7 +103,7 @@ export default function PredictionForm({ game, prediction }) {
         <div className="flex-1" />
 
         {/* Centro fixo: input | × | input — mesma width=120 do GameCard */}
-        <div className="flex items-center gap-2" style={{ width: 120 }}>
+        <div className="flex items-center justify-center gap-2" style={{ width: 120 }}>
           <input
             inputMode="numeric" pattern="[0-9]*"
             className="w-9 h-9 text-center text-xl font-display rounded-xl bg-white/8 border border-white/15 text-white outline-none focus:border-green transition"
@@ -118,7 +111,7 @@ export default function PredictionForm({ game, prediction }) {
             onChange={e => setHome(onlyDigits(e.target.value))}
             aria-label={`Placar ${game.homeTeam}`}
           />
-          <span className="font-display text-base text-slate">×</span>
+          <span className="w-4 text-center font-display text-base text-slate">×</span>
           <input
             inputMode="numeric" pattern="[0-9]*"
             className="w-9 h-9 text-center text-xl font-display rounded-xl bg-white/8 border border-white/15 text-white outline-none focus:border-green transition"

@@ -6,6 +6,9 @@ export function subscribeGames(callback) {
   return onSnapshot(q, (snap) => {
     const games = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     callback(games);
+  }, (err) => {
+    console.warn('Falha ao carregar jogos.', err);
+    callback([]);
   });
 }
 
@@ -14,5 +17,8 @@ export function subscribeLiveGames(callback) {
   return onSnapshot(q, (snap) => {
     const games = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     callback(games);
+  }, (err) => {
+    console.warn('Falha ao carregar jogos ao vivo.', err);
+    callback([]);
   });
 }

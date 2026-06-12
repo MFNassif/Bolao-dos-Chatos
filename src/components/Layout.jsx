@@ -1,39 +1,68 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../routes/AuthContext';
 import { useBella } from '../routes/BellaContext';
 import { logout } from '../services/authService';
-import { subscribeSettings } from '../services/settingsService';
+import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, calcPrizes } from '../services/settingsService';
+import { getPoolMemberCount, subscribePoolMember } from '../services/poolService';
 import BottomNav from './BottomNav';
-
-const SCORING = [
-  { pts: 5, label: 'Placar exato',                  color: 'text-yellow-400', bg: 'bg-yellow-500/15 border border-yellow-500/30' },
-  { pts: 1, label: 'Acertou o vencedor ou empate',  color: 'text-green-light', bg: 'bg-green/15 border border-green/30' },
-  { pts: 0, label: 'Errou tudo',                    color: 'text-slate',       bg: 'bg-white/5 border border-white/8' }
-];
+import PoolGate from './PoolGate';
+import PoolSwitcher from './PoolSwitcher';
 
 export default function Layout() {
-  const { profile }     = useAuth();
+  const { user, profile } = useAuth();
   const { bella, toggle } = useBella();
   const navigate        = useNavigate();
-  const location        = useLocation();
   const [showRules, setShowRules] = useState(false);
   const [settings, setSettings]   = useState(null);
-  const isKnockoutPage = location.pathname.startsWith('/mata-mata');
+  const [myMember, setMyMember]   = useState(null);
+  const [participantCount, setParticipantCount] = useState(0);
 
   useEffect(() => {
-    return subscribeSettings(setSettings);
-  }, []);
+    if (!profile?.activePoolId) {
+      setSettings(null);
+      return;
+    }
+    const unsub = subscribePoolSettings(profile.activePoolId, setSettings);
+    return unsub;
+  }, [profile?.activePoolId]);
+
+  useEffect(() => {
+    if (!profile?.activePoolId || !user?.uid) {
+      setMyMember(null);
+      setParticipantCount(0);
+      return;
+    }
+    let cancelled = false;
+    getPoolMemberCount(profile.activePoolId)
+      .then(count => { if (!cancelled) setParticipantCount(count); })
+      .catch(() => { if (!cancelled) setParticipantCount(0); });
+    const unsub = subscribePoolMember(profile.activePoolId, user.uid, setMyMember);
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [profile?.activePoolId, user?.uid]);
 
   async function handleLogout() {
     await logout();
     navigate('/login', { replace: true });
   }
 
+  const activeSettings = settings || DEFAULT_POOL_SETTINGS;
+  const prizes = settings ? calcPrizes(activeSettings, participantCount) : null;
+  const myPoints = myMember?.totalPoints ?? profile?.totalPoints ?? 0;
+  const scoring = [
+    { key: 'exact', pts: activeSettings.exactScorePoints, label: 'Placar exato', color: 'text-yellow-400', bg: 'bg-yellow-500/15 border border-yellow-500/30' },
+    { key: 'result', pts: activeSettings.correctResultPoints, label: 'Acertou o vencedor ou empate', color: 'text-green-light', bg: 'bg-green/15 border border-green/30' },
+    { key: 'miss', pts: 0, label: 'Errou tudo', color: 'text-slate', bg: 'bg-white/5 border border-white/8' }
+  ];
+
+  if (profile && !profile.activePoolId) return <PoolGate />;
+
   const desktopLinks = [
     { to: '/', label: 'Jogos', end: true },
     { to: '/palpites', label: 'Palpites' },
-    { to: '/mata-mata', label: 'Mata-mata' },
     { to: '/ranking', label: 'Ranking' }
   ];
   if (profile?.role === 'admin') desktopLinks.push({ to: '/admin', label: 'Admin' });
@@ -50,17 +79,22 @@ export default function Layout() {
             <h1 className="font-display text-lg leading-none text-white tracking-wider">BOLÃO DOS CHATOS</h1>
             {profile && (
               <p className="text-xs text-slate truncate">
-                {profile.displayName} · <span className="text-green-light font-semibold">{profile.totalPoints || 0} pts</span>
+                {profile.displayName} · {profile.activePoolName || 'Bolão'} · <span className="text-green-light font-semibold">{myPoints} pts</span>
+                {prizes && prizes.total > 0 && (
+                  <span className="ml-2 text-yellow-400 font-semibold">· {settings.currency} {prizes.total}</span>
+                )}
               </p>
             )}
           </div>
 
           {/* Botões do header */}
           <div className="flex items-center gap-1.5 shrink-0">
-            {/* Modo Bella */}
+            <PoolSwitcher />
+
+            {/* Modo Diva */}
             <button
               onClick={toggle}
-              title={bella ? 'Desativar Modo Bella' : 'Ativar Modo Bella'}
+              title={bella ? 'Desativar Modo Diva' : 'Ativar Modo Diva'}
               className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition border ${
                 bella
                   ? 'bg-pink-500/20 border-pink-500/40 text-pink-300'
@@ -68,7 +102,7 @@ export default function Layout() {
               }`}
             >
               <span>💅</span>
-              <span className="hidden sm:inline">Modo Bella</span>
+              <span className="hidden sm:inline">Modo Diva</span>
             </button>
 
             {/* Regras */}
@@ -106,8 +140,8 @@ export default function Layout() {
               <div>
                 <p className="text-[10px] text-slate uppercase tracking-wider font-bold mb-2">Pontuação</p>
                 <div className="grid grid-cols-3 gap-2">
-                  {SCORING.map(r => (
-                    <div key={r.pts} className={`${r.bg} rounded-xl p-3 text-center`}>
+                  {scoring.map(r => (
+                    <div key={r.key} className={`${r.bg} rounded-xl p-3 text-center`}>
                       <p className={`font-display text-2xl ${r.color}`}>{r.pts}</p>
                       <p className="text-[10px] text-slate uppercase tracking-wider">pts</p>
                       <p className="text-[11px] text-white/70 mt-1">{r.label}</p>
@@ -115,20 +149,20 @@ export default function Layout() {
                   ))}
                 </div>
               </div>
-              {settings && (
+              {prizes && settings && (
                 <div>
                   <p className="text-[10px] text-slate uppercase tracking-wider font-bold mb-2">
-                    Premiação · {settings.currency} {settings.betAmount} por participante
+                    Premiação · {participantCount} participante{participantCount !== 1 ? 's' : ''} × {settings.currency} {settings.betAmount} = <span className="text-green-light">{settings.currency} {prizes.total}</span>
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      { pos: '🥇 1º', pct: settings.prize1, color: 'text-yellow-400', bg: 'bg-yellow-500/15 border-yellow-500/30' },
-                      { pos: '🥈 2º', pct: settings.prize2, color: 'text-slate',      bg: 'bg-white/8 border-white/10' },
-                      { pos: '🥉 3º', pct: settings.prize3, color: 'text-amber-600', bg: 'bg-amber-900/20 border-amber-700/30' }
+                      { pos: '🥇 1º', amount: prizes.first,  pct: settings.prize1, color: 'text-yellow-400', bg: 'bg-yellow-500/15 border-yellow-500/30' },
+                      { pos: '🥈 2º', amount: prizes.second, pct: settings.prize2, color: 'text-slate',      bg: 'bg-white/8 border-white/10' },
+                      { pos: '🥉 3º', amount: prizes.third,  pct: settings.prize3, color: 'text-amber-600', bg: 'bg-amber-900/20 border-amber-700/30' }
                     ].map(p => (
                       <div key={p.pos} className={`rounded-xl border p-3 text-center ${p.bg}`}>
                         <p className="text-sm font-bold text-white">{p.pos}</p>
-                        <p className={`font-display text-xl mt-1 ${p.color}`}>{p.pct}%</p>
+                        <p className={`font-display text-xl mt-1 ${p.color}`}>{settings.currency} {p.amount}</p>
                         <p className="text-[10px] text-slate">{p.pct}% do total</p>
                       </div>
                     ))}
@@ -141,7 +175,7 @@ export default function Layout() {
         )}
       </header>
 
-      {/* Barra mobile: regras + modo bella info */}
+      {/* Barra mobile: regras + modo diva info */}
       <div className="sm:hidden px-4 pt-3 flex gap-2">
         <button onClick={() => setShowRules(!showRules)}
           className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl bg-white/6 border border-white/8 text-xs font-semibold text-slate">
@@ -152,38 +186,36 @@ export default function Layout() {
       {/* Painel de regras mobile */}
       {showRules && (
         <div className="sm:hidden mx-4 mt-2 card p-3 space-y-3">
-          {SCORING.map(r => (
-            <div key={r.pts} className={`${r.bg} rounded-lg p-2 flex items-center gap-3`}>
+          {scoring.map(r => (
+            <div key={r.key} className={`${r.bg} rounded-lg p-2 flex items-center gap-3`}>
               <span className={`font-display text-2xl w-8 text-center ${r.color}`}>{r.pts}</span>
               <span className="text-xs text-white/80">{r.label}</span>
             </div>
           ))}
-          {settings && (
+          {prizes && settings && (
             <div className="pt-2 border-t border-white/8">
               <p className="text-[11px] text-slate mb-2">
-                Valor por participante: <span className="text-green-light font-bold">{settings.currency} {settings.betAmount}</span>
+                Prêmio total: <span className="text-green-light font-bold">{settings.currency} {prizes.total}</span>
               </p>
               <div className="grid grid-cols-3 gap-1.5 text-center text-[11px]">
-                <div className="bg-yellow-500/15 rounded-lg p-2"><p className="text-yellow-400 font-display text-base">{settings.prize1}%</p><p className="text-slate">1º lugar</p></div>
-                <div className="bg-white/8 rounded-lg p-2"><p className="text-slate font-display text-base">{settings.prize2}%</p><p className="text-slate">2º lugar</p></div>
-                <div className="bg-amber-900/20 rounded-lg p-2"><p className="text-amber-600 font-display text-base">{settings.prize3}%</p><p className="text-slate">3º lugar</p></div>
+                <div className="bg-yellow-500/15 rounded-lg p-2"><p className="text-yellow-400 font-display text-base">{settings.currency} {prizes.first}</p><p className="text-slate">1º lugar</p></div>
+                <div className="bg-white/8 rounded-lg p-2"><p className="text-slate font-display text-base">{settings.currency} {prizes.second}</p><p className="text-slate">2º lugar</p></div>
+                <div className="bg-amber-900/20 rounded-lg p-2"><p className="text-amber-600 font-display text-base">{settings.currency} {prizes.third}</p><p className="text-slate">3º lugar</p></div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Banner Modo Bella ativo */}
+      {/* Banner Modo Diva ativo */}
       {bella && (
         <div className="mx-4 mt-3 rounded-xl bg-pink-500/15 border border-pink-500/30 px-3 py-2 flex items-center justify-between">
-          <p className="text-xs text-pink-300 font-semibold">💅 Modo Bella ativado — nomes por extenso em português</p>
+          <p className="text-xs text-pink-300 font-semibold">💅 Modo Diva ativado — nomes por extenso em português</p>
           <button onClick={toggle} className="text-pink-400 text-xs underline ml-3">desativar</button>
         </div>
       )}
 
-      <main className={`flex-1 mx-auto w-full pt-4 pb-28 md:pb-10 ${
-        isKnockoutPage ? 'max-w-[1500px] px-2 sm:px-4' : 'max-w-5xl px-4'
-      }`}>
+      <main className="flex-1 max-w-5xl mx-auto w-full px-4 pt-4 pb-28 md:pb-10">
         <Outlet />
       </main>
       <BottomNav />

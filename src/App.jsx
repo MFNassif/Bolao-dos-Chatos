@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { auth, db } from './services/firebase';
+import { auth, authPersistenceReady, db } from './services/firebase';
 import { AuthContext } from './routes/AuthContext';
 import { BellaProvider } from './routes/BellaContext';
 import ProtectedRoute from './routes/ProtectedRoute';
@@ -15,7 +15,6 @@ import Games from './pages/Games';
 import Predictions from './pages/Predictions';
 import Ranking from './pages/Ranking';
 import Admin from './pages/Admin';
-import KnockoutSimulator from './pages/KnockoutSimulator';
 
 export default function App() {
   const [user, setUser]           = useState(null);
@@ -24,13 +23,21 @@ export default function App() {
   const [profileReady, setProfileReady] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, u => {
-      setUser(u || null);
-      setAuthReady(true);
-      if (!u) { setProfile(null); setProfileReady(true); }
-      else setProfileReady(false);
+    let unsubscribe = null;
+    let cancelled = false;
+    authPersistenceReady.finally(() => {
+      if (cancelled) return;
+      unsubscribe = onAuthStateChanged(auth, u => {
+        setUser(u || null);
+        setAuthReady(true);
+        if (!u) { setProfile(null); setProfileReady(true); }
+        else setProfileReady(false);
+      });
     });
-    return unsub;
+    return () => {
+      cancelled = true;
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -55,7 +62,6 @@ export default function App() {
             <Route element={<Layout />}>
               <Route path="/"          element={<Games />} />
               <Route path="/palpites"  element={<Predictions />} />
-              <Route path="/mata-mata" element={<KnockoutSimulator />} />
               <Route path="/ranking"   element={<Ranking />} />
               <Route element={<AdminRoute />}>
                 <Route path="/admin" element={<Admin />} />

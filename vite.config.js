@@ -29,18 +29,7 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) => url.origin === 'https://firestore.googleapis.com',
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'firestore-cache',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 100, maxAgeSeconds: 86400 }
-            }
-          }
-        ]
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}']
       }
     })
   ],

@@ -45,7 +45,7 @@ export default function GameCard({ game, children }) {
       </div>
 
       {bella ? (
-        /* ── MODO BELLA: vertical ── */
+        /* ── MODO DIVA: vertical ── */
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <Flag flag={game.homeTeamFlag} code={game.homeTeamCode} />
@@ -84,15 +84,19 @@ export default function GameCard({ game, children }) {
           <div className="flex flex-col items-center justify-center" style={{ width: 120 }}>
             {hasScore ? (
               <div className="flex items-center justify-center gap-2 w-full">
-                <span className="font-display text-3xl text-white leading-none w-9 text-center">{game.homeScore}</span>
-                <span className="font-display text-lg text-slate leading-none">×</span>
-                <span className="font-display text-3xl text-white leading-none w-9 text-center">{game.awayScore}</span>
+                <span className="w-9 h-9 rounded-xl bg-white/8 border border-white/10 flex items-center justify-center font-display text-xl text-white">
+                  {game.homeScore}
+                </span>
+                <span className="w-4 text-center font-display text-base text-slate">×</span>
+                <span className="w-9 h-9 rounded-xl bg-white/8 border border-white/10 flex items-center justify-center font-display text-xl text-white">
+                  {game.awayScore}
+                </span>
               </div>
             ) : (
               <div className="flex items-center justify-center gap-2 w-full">
-                <span className="w-9 h-9 rounded-xl bg-white/6 border border-white/10 flex items-center justify-center font-display text-xl text-white/20">—</span>
-                <span className="font-display text-base text-slate">×</span>
-                <span className="w-9 h-9 rounded-xl bg-white/6 border border-white/10 flex items-center justify-center font-display text-xl text-white/20">—</span>
+                <span className="w-9 h-9 rounded-xl bg-white/6 border border-white/10 flex items-center justify-center font-display text-xl text-white/20">-</span>
+                <span className="w-4 text-center font-display text-base text-slate">×</span>
+                <span className="w-9 h-9 rounded-xl bg-white/6 border border-white/10 flex items-center justify-center font-display text-xl text-white/20">-</span>
               </div>
             )}
             <p className="text-[10px] text-slate mt-1.5">{formatDate(game.startTime)}</p>
