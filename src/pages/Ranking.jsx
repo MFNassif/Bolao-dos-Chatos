@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../routes/AuthContext';
 import { subscribeRanking } from '../services/rankingService';
-import { subscribeGames } from '../services/gameService';
+import { subscribeLiveGames } from '../services/gameService';
 import { subscribeSettings, calcPrizes } from '../services/settingsService';
 import RankingTable from '../components/RankingTable';
 import Loading from '../components/Loading';
@@ -21,7 +21,7 @@ export default function Ranking() {
 
   useEffect(() => {
     const u1 = subscribeRanking(setRows);
-    const u2 = subscribeGames(setGames);
+    const u2 = subscribeLiveGames(setGames);
     const u3 = subscribeSettings(setSettings);
     return () => { u1(); u2(); u3(); };
   }, []);

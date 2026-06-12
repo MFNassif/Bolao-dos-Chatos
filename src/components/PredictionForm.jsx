@@ -2,11 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { isLocked } from '../utils/locks';
 import { savePrediction } from '../services/predictionService';
 import { scorePrediction } from '../utils/scoring';
+import { isFixtureReadyForPrediction } from '../utils/games';
 import { useAuth } from '../routes/AuthContext';
 
 export default function PredictionForm({ game, prediction }) {
   const { user, profile } = useAuth();
   const locked = isLocked(game.startTime);
+  const fixtureReady = isFixtureReadyForPrediction(game);
   const [home, setHome] = useState(prediction?.homePrediction ?? '');
   const [away, setAway] = useState(prediction?.awayPrediction ?? '');
   const [saving, setSaving] = useState(false);
@@ -32,6 +34,10 @@ export default function PredictionForm({ game, prediction }) {
   async function handleSubmit(e) {
     e.preventDefault();
     setMsg(null);
+    if (!fixtureReady) {
+      setMsg({ type: 'error', text: 'Confronto ainda nao definido.' });
+      return;
+    }
     if (home === '' || away === '') {
       setMsg({ type: 'error', text: 'Informe os dois placares.' });
       return;
@@ -46,6 +52,15 @@ export default function PredictionForm({ game, prediction }) {
       setSaving(false);
       setTimeout(() => setMsg(null), 2500);
     }
+  }
+
+  if (!fixtureReady) {
+    return (
+      <div className="flex flex-col items-center gap-1.5 text-center">
+        <span className="chip bg-white/8 text-slate">aguardando confronto</span>
+        <span className="text-[11px] text-slate">Palpite liberado quando os times forem definidos.</span>
+      </div>
+    );
   }
 
   /* Bloqueado / encerrado */

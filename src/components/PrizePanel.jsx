@@ -1,20 +1,16 @@
 import { useEffect, useState } from 'react';
 import { subscribeSettings, calcPrizes } from '../services/settingsService';
-import { subscribeRanking } from '../services/rankingService';
 
 export default function PrizePanel() {
   const [settings, setSettings] = useState(null);
-  const [ranking, setRanking] = useState([]);
 
   useEffect(() => {
-    const u1 = subscribeSettings(setSettings);
-    const u2 = subscribeRanking(setRanking);
-    return () => { u1(); u2(); };
+    return subscribeSettings(setSettings);
   }, []);
 
   if (!settings) return null;
 
-  const participants = ranking.length;
+  const participants = settings.participantCount || 0;
   const prizes = calcPrizes(settings, participants);
 
   const positions = [

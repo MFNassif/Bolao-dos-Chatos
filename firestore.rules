@@ -26,10 +26,6 @@ service cloud.firestore {
       return request.time < gameLockTime(gameId);
     }
 
-    function isAfterLock(gameId) {
-      return request.time >= gameLockTime(gameId);
-    }
-
     // ===== Usuários =====
     // Qualquer usuário logado pode ler dados básicos (necessário p/ ranking).
     // Apenas o próprio usuário pode CRIAR seu doc, e não pode alterar pontuação/role.
@@ -76,13 +72,8 @@ service cloud.firestore {
     // ===== Palpites =====
     // Documento: predictions/{gameId_userId}
     match /predictions/{predictionId} {
-      // Leitura: dono sempre pode ler o próprio.
-      // Outros usuários só podem ler depois que o jogo ficar bloqueado.
-      allow read: if isSignedIn() && (
-        resource.data.userId == request.auth.uid ||
-        isAfterLock(resource.data.gameId) ||
-        isAdmin()
-      );
+      // Leitura liberada para usuarios logados para calcular medias gerais.
+      allow read: if isSignedIn();
 
       // Criação: só o próprio usuário, antes do bloqueio.
       allow create: if isSignedIn() &&

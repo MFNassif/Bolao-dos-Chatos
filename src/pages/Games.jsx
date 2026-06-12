@@ -3,6 +3,7 @@ import { useAuth } from '../routes/AuthContext';
 import { subscribeGames } from '../services/gameService';
 import { subscribeMyPredictions } from '../services/predictionService';
 import { dayKey, dayLabel, toMillis } from '../utils/dates';
+import { groupSortValue } from '../utils/games';
 import GameCard from '../components/GameCard';
 import PredictionForm from '../components/PredictionForm';
 import Loading from '../components/Loading';
@@ -67,7 +68,9 @@ export default function Games() {
       if (!map.has(grp)) map.set(grp, []);
       map.get(grp).push(g);
     });
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+    return Array.from(map.entries()).sort(([a], [b]) =>
+      groupSortValue(a) - groupSortValue(b) || String(a).localeCompare(String(b))
+    );
   }, [filtered, activeGroup]);
 
   /* agrupado por data (view === 'chrono') */

@@ -59,6 +59,46 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
 }
 
 /**
+ * Remove a conta do bolao no Firestore: perfil, username reservado e palpites.
+ * O Firebase Auth exige Admin SDK/back-end para excluir outro usuario de login.
+ */
+export async function deleteUserAccount({ uid, username }) {
+  if (!uid) throw new Error('Usuario invalido.');
+
+  const predsSnap = await getDocs(query(collection(db, 'predictions'), where('userId', '==', uid)));
+  let batch = writeBatch(db);
+  let ops = 0;
+
+  async function addDelete(ref) {
+    batch.delete(ref);
+    ops += 1;
+    if (ops >= 450) {
+      await batch.commit();
+      batch = writeBatch(db);
+      ops = 0;
+    }
+  }
+
+  for (const pred of predsSnap.docs) {
+    await addDelete(pred.ref);
+  }
+
+  if (username) await addDelete(doc(db, 'usernames', String(username).toLowerCase()));
+  await addDelete(doc(db, 'users', uid));
+
+  const logRef = doc(collection(db, 'syncLogs'));
+  batch.set(logRef, {
+    type: 'deleteUserAccount',
+    success: true,
+    message: `Conta ${uid} removida do Firestore (${predsSnap.size} palpites).`,
+    createdAt: serverTimestamp()
+  });
+  await batch.commit();
+
+  return { predictions: predsSnap.size };
+}
+
+/**
  * Recalcula pontuação dos palpites de UM jogo e atualiza agregados dos
  * usuários envolvidos. Vale tanto para live quanto para finished.
  */

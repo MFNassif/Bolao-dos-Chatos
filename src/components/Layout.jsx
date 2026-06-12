@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../routes/AuthContext';
 import { useBella } from '../routes/BellaContext';
 import { logout } from '../services/authService';
-import { subscribeSettings, calcPrizes } from '../services/settingsService';
-import { subscribeRanking } from '../services/rankingService';
+import { subscribeSettings } from '../services/settingsService';
 import BottomNav from './BottomNav';
 
 const SCORING = [
@@ -17,14 +16,13 @@ export default function Layout() {
   const { profile }     = useAuth();
   const { bella, toggle } = useBella();
   const navigate        = useNavigate();
+  const location        = useLocation();
   const [showRules, setShowRules] = useState(false);
   const [settings, setSettings]   = useState(null);
-  const [ranking, setRanking]     = useState([]);
+  const isKnockoutPage = location.pathname.startsWith('/mata-mata');
 
   useEffect(() => {
-    const u1 = subscribeSettings(setSettings);
-    const u2 = subscribeRanking(setRanking);
-    return () => { u1(); u2(); };
+    return subscribeSettings(setSettings);
   }, []);
 
   async function handleLogout() {
@@ -32,11 +30,10 @@ export default function Layout() {
     navigate('/login', { replace: true });
   }
 
-  const prizes = settings ? calcPrizes(settings, ranking.length) : null;
-
   const desktopLinks = [
     { to: '/', label: 'Jogos', end: true },
     { to: '/palpites', label: 'Palpites' },
+    { to: '/mata-mata', label: 'Mata-mata' },
     { to: '/ranking', label: 'Ranking' }
   ];
   if (profile?.role === 'admin') desktopLinks.push({ to: '/admin', label: 'Admin' });
@@ -54,9 +51,6 @@ export default function Layout() {
             {profile && (
               <p className="text-xs text-slate truncate">
                 {profile.displayName} · <span className="text-green-light font-semibold">{profile.totalPoints || 0} pts</span>
-                {prizes && prizes.total > 0 && (
-                  <span className="ml-2 text-yellow-400 font-semibold">· {settings.currency} {prizes.total}</span>
-                )}
               </p>
             )}
           </div>
@@ -121,20 +115,20 @@ export default function Layout() {
                   ))}
                 </div>
               </div>
-              {prizes && settings && (
+              {settings && (
                 <div>
                   <p className="text-[10px] text-slate uppercase tracking-wider font-bold mb-2">
-                    Premiação · {ranking.length} participante{ranking.length !== 1 ? 's' : ''} × {settings.currency} {settings.betAmount} = <span className="text-green-light">{settings.currency} {prizes.total}</span>
+                    Premiação · {settings.currency} {settings.betAmount} por participante
                   </p>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      { pos: '🥇 1º', amount: prizes.first,  pct: settings.prize1, color: 'text-yellow-400', bg: 'bg-yellow-500/15 border-yellow-500/30' },
-                      { pos: '🥈 2º', amount: prizes.second, pct: settings.prize2, color: 'text-slate',      bg: 'bg-white/8 border-white/10' },
-                      { pos: '🥉 3º', amount: prizes.third,  pct: settings.prize3, color: 'text-amber-600', bg: 'bg-amber-900/20 border-amber-700/30' }
+                      { pos: '🥇 1º', pct: settings.prize1, color: 'text-yellow-400', bg: 'bg-yellow-500/15 border-yellow-500/30' },
+                      { pos: '🥈 2º', pct: settings.prize2, color: 'text-slate',      bg: 'bg-white/8 border-white/10' },
+                      { pos: '🥉 3º', pct: settings.prize3, color: 'text-amber-600', bg: 'bg-amber-900/20 border-amber-700/30' }
                     ].map(p => (
                       <div key={p.pos} className={`rounded-xl border p-3 text-center ${p.bg}`}>
                         <p className="text-sm font-bold text-white">{p.pos}</p>
-                        <p className={`font-display text-xl mt-1 ${p.color}`}>{settings.currency} {p.amount}</p>
+                        <p className={`font-display text-xl mt-1 ${p.color}`}>{p.pct}%</p>
                         <p className="text-[10px] text-slate">{p.pct}% do total</p>
                       </div>
                     ))}
@@ -164,15 +158,15 @@ export default function Layout() {
               <span className="text-xs text-white/80">{r.label}</span>
             </div>
           ))}
-          {prizes && settings && (
+          {settings && (
             <div className="pt-2 border-t border-white/8">
               <p className="text-[11px] text-slate mb-2">
-                Prêmio total: <span className="text-green-light font-bold">{settings.currency} {prizes.total}</span>
+                Valor por participante: <span className="text-green-light font-bold">{settings.currency} {settings.betAmount}</span>
               </p>
               <div className="grid grid-cols-3 gap-1.5 text-center text-[11px]">
-                <div className="bg-yellow-500/15 rounded-lg p-2"><p className="text-yellow-400 font-display text-base">{settings.currency} {prizes.first}</p><p className="text-slate">1º lugar</p></div>
-                <div className="bg-white/8 rounded-lg p-2"><p className="text-slate font-display text-base">{settings.currency} {prizes.second}</p><p className="text-slate">2º lugar</p></div>
-                <div className="bg-amber-900/20 rounded-lg p-2"><p className="text-amber-600 font-display text-base">{settings.currency} {prizes.third}</p><p className="text-slate">3º lugar</p></div>
+                <div className="bg-yellow-500/15 rounded-lg p-2"><p className="text-yellow-400 font-display text-base">{settings.prize1}%</p><p className="text-slate">1º lugar</p></div>
+                <div className="bg-white/8 rounded-lg p-2"><p className="text-slate font-display text-base">{settings.prize2}%</p><p className="text-slate">2º lugar</p></div>
+                <div className="bg-amber-900/20 rounded-lg p-2"><p className="text-amber-600 font-display text-base">{settings.prize3}%</p><p className="text-slate">3º lugar</p></div>
               </div>
             </div>
           )}
@@ -187,7 +181,9 @@ export default function Layout() {
         </div>
       )}
 
-      <main className="flex-1 max-w-5xl mx-auto w-full px-4 pt-4 pb-28 md:pb-10">
+      <main className={`flex-1 mx-auto w-full pt-4 pb-28 md:pb-10 ${
+        isKnockoutPage ? 'max-w-[1500px] px-2 sm:px-4' : 'max-w-5xl px-4'
+      }`}>
         <Outlet />
       </main>
       <BottomNav />

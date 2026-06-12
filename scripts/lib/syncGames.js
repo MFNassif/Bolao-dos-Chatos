@@ -86,7 +86,7 @@ async function syncGames() {
     console.error('[syncGames] erro:', err);
   }
 
-  await firestore.collection('syncLogs').add({
+  await writeSyncLog(firestore, {
     type: 'syncGames',
     success,
     message,
@@ -101,6 +101,14 @@ async function syncGames() {
 }
 
 module.exports = { syncGames };
+
+async function writeSyncLog(firestore, payload) {
+  try {
+    await firestore.collection('syncLogs').add(payload);
+  } catch (err) {
+    console.warn(`[syncLogs] log ignorado: ${err.message || err}`);
+  }
+}
 
 function findExistingGame(game, existingGames) {
   const targetTime = toMillis(game.startTime);

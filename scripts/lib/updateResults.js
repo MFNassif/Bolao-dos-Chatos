@@ -19,7 +19,8 @@ async function updateResults() {
 
   try {
     const fixtures = await fetchFixtures();
-    const existingSnap = await firestore.collection('games').get();
+    const window = getUpdateWindow();
+    const existingSnap = await loadRelevantGames(firestore, window);
     const byExt = new Map();
     const existingGames = [];
     existingSnap.forEach((d) => {
@@ -30,6 +31,7 @@ async function updateResults() {
 
     for (const fx of fixtures) {
       const game = mapFixtureToGame(fx);
+      if (!isRelevantGame(game, window)) continue;
       const existing = byExt.get(game.externalId) || findExistingGame(game, existingGames);
       if (!existing) continue;
       const cur = existing.data;
@@ -68,20 +70,60 @@ async function updateResults() {
     console.error('[updateResults] erro:', err);
   }
 
-  await firestore.collection('syncLogs').add({
-    type: 'updateResults',
-    success,
-    message,
-    updated,
-    recalculated,
-    durationMs: Date.now() - start,
-    createdAt: admin.firestore.FieldValue.serverTimestamp()
-  });
+  if (!success || updated > 0 || recalculated > 0) {
+    await writeSyncLog(firestore, {
+      type: 'updateResults',
+      success,
+      message,
+      updated,
+      recalculated,
+      durationMs: Date.now() - start,
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+  }
 
   return { success, updated, recalculated, message };
 }
 
 module.exports = { updateResults };
+
+async function loadRelevantGames(firestore, window) {
+  const docs = new Map();
+  const addDocs = (snap) => snap.forEach((doc) => docs.set(doc.id, doc));
+
+  addDocs(await firestore.collection('games')
+    .where('startTime', '>=', window.start)
+    .where('startTime', '<=', window.end)
+    .get());
+
+  addDocs(await firestore.collection('games')
+    .where('status', '==', 'live')
+    .get());
+
+  return { forEach: (fn) => docs.forEach(fn) };
+}
+
+async function writeSyncLog(firestore, payload) {
+  try {
+    await firestore.collection('syncLogs').add(payload);
+  } catch (err) {
+    console.warn(`[syncLogs] log ignorado: ${err.message || err}`);
+  }
+}
+
+function getUpdateWindow() {
+  const now = Date.now();
+  return {
+    start: new Date(now - 8 * 60 * 60 * 1000),
+    end: new Date(now + 60 * 60 * 1000)
+  };
+}
+
+function isRelevantGame(game, window) {
+  if (game.status === 'live') return true;
+  const ms = toMillis(game.startTime);
+  return !!ms && ms >= window.start.getTime() && ms <= window.end.getTime();
+}
 
 function findExistingGame(game, existingGames) {
   const targetTime = toMillis(game.startTime);

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { subscribeGames } from '../services/gameService';
-import { setGameResult, recalculateAllScores, setUserRole } from '../services/adminService';
+import { setGameResult, recalculateAllScores, setUserRole, deleteUserAccount } from '../services/adminService';
 import { subscribeSettings, saveSettings, DEFAULT_SETTINGS } from '../services/settingsService';
+import { useAuth } from '../routes/AuthContext';
 import { formatDateTime } from '../utils/dates';
 import Loading from '../components/Loading';
 
@@ -239,6 +240,7 @@ function GameRow({ game, busy, onRun }) {
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 function UsersAdmin({ busy, onRun }) {
+  const { user } = useAuth();
   const [users, setUsers] = useState(null);
   const [q, setQ] = useState('');
 
@@ -257,6 +259,22 @@ function UsersAdmin({ busy, onRun }) {
   }, [users, q]);
 
   if (users === null) return <Loading />;
+
+  async function removeUser(u) {
+    const uid = u.uid || u.id;
+    if (uid === user.uid) {
+      alert('Nao da para excluir sua propria conta por aqui.');
+      return;
+    }
+    if (!confirm(`Excluir a conta de ${u.displayName}? Isso apaga perfil, username e todos os palpites do bolao.`)) return;
+    if (!confirm('Tem certeza? Essa acao nao pode ser desfeita pelo app.')) return;
+
+    await onRun('Excluir conta', async () => {
+      const result = await deleteUserAccount({ uid, username: u.username });
+      setUsers(list => list.filter(x => (x.uid || x.id) !== uid));
+      return { message: `${u.displayName} excluido. ${result.predictions} palpites removidos.` };
+    });
+  }
 
   async function toggleRole(u) {
     const newRole = u.role === 'admin' ? 'user' : 'admin';
@@ -282,6 +300,9 @@ function UsersAdmin({ busy, onRun }) {
               <span className={`chip ${u.role === 'admin' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/8 text-slate'}`}>{u.role}</span>
               <button className="btn-ghost text-xs" disabled={busy} onClick={() => toggleRole(u)}>
                 {u.role === 'admin' ? 'Tornar user' : 'Tornar admin'}
+              </button>
+              <button className="btn-danger text-xs" disabled={busy || (u.uid || u.id) === user.uid} onClick={() => removeUser(u)}>
+                Excluir
               </button>
             </li>
           ))}

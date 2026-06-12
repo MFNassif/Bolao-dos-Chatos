@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../services/firebase';
 import { subscribeGames } from '../services/gameService';
 import { subscribePredictionsForGame } from '../services/predictionService';
-import { isLocked } from '../utils/locks';
 import { formatTime, formatDate } from '../utils/dates';
 import { useBella } from '../routes/BellaContext';
 import { getFullName } from '../utils/teamNames';
@@ -12,7 +9,6 @@ import Loading from '../components/Loading';
 export default function Predictions() {
   const { bella } = useBella();
   const [games, setGames]               = useState(null);
-  const [users, setUsers]               = useState([]);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [selectedGame, setSelectedGame]   = useState(null);
   const [selectedUser, setSelectedUser]   = useState('');
@@ -24,22 +20,10 @@ export default function Predictions() {
       setGames(g);
       setSelectedGame(cur => {
         if (cur) return cur;
-        const locked = g.filter(x => isLocked(x.startTime));
-        return locked[locked.length - 1]?.id || g[0]?.id || null;
+        return g[0]?.id || null;
       });
     });
     return unsub;
-  }, []);
-
-  // Carrega lista de participantes uma vez
-  useEffect(() => {
-    (async () => {
-      const snap = await getDocs(collection(db, 'users'));
-      const list = snap.docs
-        .map(d => ({ uid: d.id, ...d.data() }))
-        .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
-      setUsers(list);
-    })();
   }, []);
 
   // Palpites do jogo selecionado
@@ -73,13 +57,32 @@ export default function Predictions() {
     () => games?.find(g => g.id === selectedGame) || null,
     [games, selectedGame]
   );
-  const locked = currentGame ? isLocked(currentGame.startTime) : false;
 
   // Filtra palpites pelo participante selecionado
   const filteredPreds = useMemo(() => {
     if (!selectedUser) return preds;
     return preds.filter(p => p.userId === selectedUser);
   }, [preds, selectedUser]);
+
+  const users = useMemo(() => {
+    const byId = new Map();
+    for (const pred of preds) {
+      if (!pred.userId || byId.has(pred.userId)) continue;
+      byId.set(pred.userId, {
+        uid: pred.userId,
+        displayName: pred.displayName,
+        username: pred.username
+      });
+    }
+    return Array.from(byId.values())
+      .sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+  }, [preds]);
+
+  useEffect(() => {
+    if (selectedUser && !users.some((u) => u.uid === selectedUser)) {
+      setSelectedUser('');
+    }
+  }, [selectedUser, users]);
 
   function teamLabel(code, name) {
     return bella ? getFullName(code, name) : (code || name);
@@ -91,7 +94,7 @@ export default function Predictions() {
     <div className="space-y-4">
       <div>
         <h2 className="font-display text-2xl text-white tracking-wider">PALPITES</h2>
-        <p className="text-sm text-slate">Visíveis para todos após 1h do início do jogo.</p>
+        <p className="text-sm text-slate">Visíveis para todos a qualquer momento.</p>
       </div>
 
       {/* Filtros */}
@@ -180,18 +183,8 @@ export default function Predictions() {
         </div>
       )}
 
-      {/* Aviso pré-bloqueio */}
-      {currentGame && !locked && (
-        <div className="card bg-yellow-900/20 border-yellow-600/30 p-3 flex items-start gap-2">
-          <span className="text-yellow-400 shrink-0">⏳</span>
-          <p className="text-sm text-yellow-300/80">
-            Os palpites só aparecem quando faltar menos de 1 hora para o jogo começar.
-          </p>
-        </div>
-      )}
-
       {/* Lista de palpites */}
-      {currentGame && locked && (
+      {currentGame && (
         <div className="card overflow-hidden">
           <div className="px-4 py-3 bg-surface-2 border-b border-white/8 flex items-center justify-between">
             <h3 className="text-xs font-bold text-slate uppercase tracking-wider">

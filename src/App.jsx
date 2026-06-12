@@ -15,6 +15,7 @@ import Games from './pages/Games';
 import Predictions from './pages/Predictions';
 import Ranking from './pages/Ranking';
 import Admin from './pages/Admin';
+import KnockoutSimulator from './pages/KnockoutSimulator';
 
 export default function App() {
   const [user, setUser]           = useState(null);
@@ -54,6 +55,7 @@ export default function App() {
             <Route element={<Layout />}>
               <Route path="/"          element={<Games />} />
               <Route path="/palpites"  element={<Predictions />} />
+              <Route path="/mata-mata" element={<KnockoutSimulator />} />
               <Route path="/ranking"   element={<Ranking />} />
               <Route element={<AdminRoute />}>
                 <Route path="/admin" element={<Admin />} />

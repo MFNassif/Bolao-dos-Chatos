@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { isLocked, LOCK_OFFSET_MS } from '../utils/locks';
+import { isFixtureReadyForPrediction } from '../utils/games';
 
 export function predictionId(gameId, userId) {
   return `${gameId}_${userId}`;
@@ -38,6 +39,7 @@ export function subscribePredictionsForGame(gameId, callback) {
 
 export async function savePrediction({ user, profile, game, home, away }) {
   if (!game) throw new Error('Jogo inválido.');
+  if (!isFixtureReadyForPrediction(game)) throw new Error('Confronto ainda nao definido.');
   if (isLocked(game.startTime)) throw new Error('Palpite bloqueado.');
 
   const h = Number(home);
