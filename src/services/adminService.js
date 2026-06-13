@@ -12,7 +12,7 @@ import { db } from './firebase';
 import { DEFAULT_POOL_SETTINGS } from './settingsService';
 import { scorePrediction } from '../utils/scoring';
 
-export async function setGameResult({ gameId, homeScore, awayScore, status }) {
+export async function setGameResult({ gameId, homeScore, awayScore, status, manualOverride = true }) {
   const gameRef = doc(db, 'games', gameId);
   const gameSnap = await getDoc(gameRef);
   if (!gameSnap.exists()) throw new Error('Jogo nao encontrado.');
@@ -36,6 +36,10 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
     else if (payload.homeScore < payload.awayScore) payload.winner = 'away';
     else payload.winner = 'draw';
   }
+  // Trava o jogo: enquanto manualOverride for true, a sincronizacao automatica
+  // (updateResults) nao sobrescreve o placar ajustado pelo admin.
+  payload.manualOverride = manualOverride === true;
+  payload.manualOverrideAt = manualOverride === true ? serverTimestamp() : null;
 
   await writeBatch(db).set(gameRef, payload, { merge: true }).commit();
   await recalculateGameScores(gameId);
@@ -44,7 +48,31 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   await writeBatch(db).set(logRef, {
     type: 'setGameResult',
     success: true,
-    message: `Resultado ajustado para ${gameId}: ${payload.homeScore ?? '-'} x ${payload.awayScore ?? '-'} (${payload.status || '-'})`,
+    message: `Resultado ajustado para ${gameId}: ${payload.homeScore ?? '-'} x ${payload.awayScore ?? '-'} (${payload.status || '-'})${payload.manualOverride ? ' [travado manual]' : ''}`,
+    createdAt: serverTimestamp()
+  }).commit();
+}
+
+/**
+ * Libera o jogo para voltar a ser atualizado pela sincronizacao automatica.
+ * Nao mexe no placar atual; apenas remove a trava manual.
+ */
+export async function clearGameManualOverride(gameId) {
+  const gameRef = doc(db, 'games', gameId);
+  const gameSnap = await getDoc(gameRef);
+  if (!gameSnap.exists()) throw new Error('Jogo nao encontrado.');
+
+  await writeBatch(db).set(gameRef, {
+    manualOverride: false,
+    manualOverrideAt: null,
+    lastUpdatedAt: serverTimestamp()
+  }, { merge: true }).commit();
+
+  const logRef = doc(collection(db, 'syncLogs'));
+  await writeBatch(db).set(logRef, {
+    type: 'clearManualOverride',
+    success: true,
+    message: `Jogo ${gameId} liberado para sincronizacao automatica.`,
     createdAt: serverTimestamp()
   }).commit();
 }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { subscribeGames } from '../services/gameService';
-import { setGameResult, recalculatePoolScores, setUserRole, removeUserFromPool } from '../services/adminService';
+import { setGameResult, clearGameManualOverride, recalculatePoolScores, setUserRole, removeUserFromPool } from '../services/adminService';
 import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, savePoolSettings } from '../services/settingsService';
 import { createPool, getPoolMembers, getPoolsForAdmin, joinPoolWithPassword } from '../services/poolService';
 import { useAuth } from '../routes/AuthContext';
@@ -300,25 +300,45 @@ function GameRow({ game, busy, onRun }) {
   const [away, setAway] = useState(game.awayScore ?? '');
   const [status, setStatus] = useState(game.status || 'scheduled');
   const [editing, setEditing] = useState(false);
+  const locked = game.manualOverride === true;
+
+  // Mantém os inputs em sincronia quando o jogo muda (ex.: sync automática),
+  // exceto enquanto o admin está editando para não apagar o que ele digita.
+  useEffect(() => {
+    if (editing) return;
+    setHome(game.homeScore ?? '');
+    setAway(game.awayScore ?? '');
+    setStatus(game.status || 'scheduled');
+  }, [game.homeScore, game.awayScore, game.status, editing]);
 
   async function save() {
     await onRun('Salvar resultado', async () => {
       await setGameResult({ gameId: game.id, homeScore: home === '' ? null : Number(home), awayScore: away === '' ? null : Number(away), status });
-      return { message: 'Resultado salvo e pontuação atualizada.' };
+      return { message: 'Resultado salvo e travado. A sincronização automática não vai sobrescrever.' };
     });
     setEditing(false);
   }
 
+  async function releaseToAuto() {
+    await onRun('Voltar ao automático', async () => {
+      await clearGameManualOverride(game.id);
+      return { message: 'Jogo liberado. A sincronização automática volta a atualizar o placar.' };
+    });
+  }
+
   return (
-    <article className="card bg-surface-2 p-4">
+    <article className={`card bg-surface-2 p-4 ${locked ? 'ring-1 ring-yellow-500/40' : ''}`}>
       <div className="flex items-center justify-between gap-3 mb-2">
         <div className="min-w-0">
           <p className="font-semibold text-white truncate text-sm">{game.homeTeam} × {game.awayTeam}</p>
           <p className="text-[11px] text-slate">{formatDateTime(game.startTime)} · {game.stage}</p>
         </div>
-        <span className={`chip ${game.status === 'finished' ? 'bg-white/8 text-slate' : game.status === 'live' ? 'bg-red-500/20 text-red-400' : 'bg-green/20 text-green-light'}`}>
-          {game.status}
-        </span>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {locked && <span className="chip bg-yellow-500/20 text-yellow-400" title="Placar travado pelo admin">🔒 manual</span>}
+          <span className={`chip ${game.status === 'finished' ? 'bg-white/8 text-slate' : game.status === 'live' ? 'bg-red-500/20 text-red-400' : 'bg-green/20 text-green-light'}`}>
+            {game.status}
+          </span>
+        </div>
       </div>
 
       {Number.isInteger(game.homeScore) && (
@@ -326,7 +346,12 @@ function GameRow({ game, busy, onRun }) {
       )}
 
       {!editing ? (
-        <button className="btn-ghost text-xs" onClick={() => setEditing(true)} disabled={busy}>Ajustar resultado</button>
+        <div className="flex gap-2 flex-wrap">
+          <button className="btn-ghost text-xs" onClick={() => setEditing(true)} disabled={busy}>Ajustar resultado</button>
+          {locked && (
+            <button className="btn-ghost text-xs text-yellow-400" onClick={releaseToAuto} disabled={busy}>Voltar ao automático</button>
+          )}
+        </div>
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
@@ -339,8 +364,9 @@ function GameRow({ game, busy, onRun }) {
               <option value="finished">finished</option>
             </select>
           </div>
+          <p className="text-[11px] text-slate">Ao salvar, o placar fica travado (🔒) e a sincronização automática não o sobrescreve até você liberar.</p>
           <div className="flex gap-2">
-            <button className="btn-primary text-xs" disabled={busy} onClick={save}>Salvar e pontuar</button>
+            <button className="btn-primary text-xs" disabled={busy} onClick={save}>Salvar e travar</button>
             <button className="btn-ghost text-xs" disabled={busy} onClick={() => setEditing(false)}>Cancelar</button>
           </div>
         </div>

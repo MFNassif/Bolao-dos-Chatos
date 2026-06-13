@@ -65,11 +65,18 @@ async function updateResults() {
       if (data.externalId) byExt.set(String(data.externalId), { id: d.id, data });
     });
 
+    let skippedManual = 0;
     for (const fx of fixtures) {
       const game = mapFixtureToGame(fx);
       const existing = byExt.get(game.externalId);
       if (!existing) continue;
       const cur = existing.data;
+
+      // Jogo travado pelo admin: nao sobrescreve o placar manual.
+      if (cur.manualOverride === true) {
+        skippedManual += 1;
+        continue;
+      }
 
       if (isRegressiveApiUpdate(cur, game)) {
         skippedRegressions += 1;
@@ -102,7 +109,7 @@ async function updateResults() {
       }
     }
 
-    message = `Atualizados ${updated} jogos. ${recalculated} recalculos disparados. ${skippedRegressions} regressoes ignoradas.`;
+    message = `Atualizados ${updated} jogos. ${recalculated} recalculos disparados. ${skippedRegressions} regressoes ignoradas. ${skippedManual} travados manual.`;
   } catch (err) {
     success = false;
     message = err.message || String(err);
