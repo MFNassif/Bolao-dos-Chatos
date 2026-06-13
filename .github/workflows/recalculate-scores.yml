@@ -1,10 +1,9 @@
 name: Recalculate Scores
 
-# Recalcula TODA a pontuação. Roda 1x por dia como true-up dos incrementos
-# do updateResults, e manualmente quando mudar regras ou após ajustes.
+# Recalcula TODA a pontuação a partir dos placares ja salvos no Firestore.
+# So roda manualmente (ex.: depois de mudar regras de pontuacao).
+# No dia a dia o ranking ja e recalculado pelo painel admin ao salvar um jogo.
 on:
-  schedule:
-    - cron: '30 7 * * *'
   workflow_dispatch: {}
 
 permissions:

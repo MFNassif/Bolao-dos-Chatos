@@ -7,7 +7,6 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "sync": "node syncGames.js",
-    "update": "node updateResults.js",
     "recalc": "node recalculate.js"
   },
   "dependencies": {

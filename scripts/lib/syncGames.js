@@ -1,9 +1,19 @@
 /**
- * Sincroniza jogos da API externa para o Firestore.
+ * Sincroniza o CALENDARIO dos jogos da API externa para o Firestore.
+ *
+ * IMPORTANTE: esta sincronizacao NUNCA mexe em placar nem em status.
+ * Quem joga, quando e em qual fase vem da API (inclusive os times que se
+ * classificam no mata-mata). Mas se o jogo iniciou (ao vivo), encerrou e o
+ * placar sao 100% controlados pelo admin no painel.
  */
 const { admin, db } = require('./firebase');
 const { fetchFixtures, mapFixtureToGame } = require('./footballApi');
-const { preserveProgressIfRegression } = require('./gameUpdateGuards');
+
+// Apenas metadados do jogo. Placar/status ficam de fora de proposito.
+const META_FIELDS = [
+  'externalId', 'homeTeam', 'awayTeam', 'homeTeamCode', 'awayTeamCode',
+  'homeTeamFlag', 'awayTeamFlag', 'stage', 'group', 'timezone'
+];
 
 async function syncGames() {
   const firestore = db();
@@ -41,16 +51,26 @@ async function syncGames() {
       const game = mapFixtureToGame(fx);
       if (!game.externalId) continue;
       const existing = byExt.get(game.externalId);
-      const safeGame = existing ? preserveProgressIfRegression(existing.data, game) : game;
-      const docId = existing ? existing.id : `ext_${game.externalId}`;
-      const ref = firestore.collection('games').doc(docId);
-      const payload = {
-        ...safeGame,
-        lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
-      };
+      const ref = firestore.collection('games').doc(existing ? existing.id : `ext_${game.externalId}`);
+
       if (existing) {
-        if (hasGameChanges(existing.data, safeGame)) {
-          batch.set(ref, payload, { merge: true });
+        // Atualiza SOMENTE metadados. status/homeScore/awayScore/winner do jogo
+        // existente sao deixados como estao (controle do admin).
+        const meta = {};
+        let changed = false;
+        for (const key of META_FIELDS) {
+          if (normalizeValue(existing.data[key]) !== normalizeValue(game[key])) {
+            meta[key] = game[key] === undefined ? null : game[key];
+            changed = true;
+          }
+        }
+        if (normalizeTime(existing.data.startTime) !== normalizeTime(game.startTime)) {
+          meta.startTime = game.startTime;
+          changed = true;
+        }
+        if (changed) {
+          meta.lastUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
+          batch.set(ref, meta, { merge: true });
           updated += 1;
           ops += 1;
           await flushIfNeeded();
@@ -58,9 +78,16 @@ async function syncGames() {
           unchanged += 1;
         }
       } else {
+        // Novo jogo entra como "nao comecou", sem placar. O admin assume daqui.
         batch.set(ref, {
-          ...payload,
-          createdAt: admin.firestore.FieldValue.serverTimestamp()
+          ...metaOf(game),
+          startTime: game.startTime,
+          status: 'scheduled',
+          homeScore: null,
+          awayScore: null,
+          winner: null,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
         added += 1;
         ops += 1;
@@ -68,7 +95,9 @@ async function syncGames() {
       }
     }
     if (ops > 0) await batch.commit();
-    if (!message) message = `Sincronizados ${fixtures.length} jogos.`;
+    if (!message) {
+      message = `Calendario sincronizado: ${added} novos, ${updated} atualizados, ${unchanged} sem mudanca. Placar e status sao manuais.`;
+    }
   } catch (err) {
     success = false;
     message = err.message || String(err);
@@ -89,25 +118,10 @@ async function syncGames() {
   return { success, added, updated, unchanged, message };
 }
 
-module.exports = { syncGames };
-
-function hasGameChanges(current, next) {
-  return [
-    'externalId',
-    'homeTeam',
-    'awayTeam',
-    'homeTeamCode',
-    'awayTeamCode',
-    'homeTeamFlag',
-    'awayTeamFlag',
-    'stage',
-    'group',
-    'status',
-    'homeScore',
-    'awayScore',
-    'winner'
-  ].some((key) => normalizeValue(current?.[key]) !== normalizeValue(next?.[key])) ||
-    normalizeTime(current?.startTime) !== normalizeTime(next?.startTime);
+function metaOf(game) {
+  const out = {};
+  for (const key of META_FIELDS) out[key] = game[key] === undefined ? null : game[key];
+  return out;
 }
 
 function normalizeValue(value) {
@@ -120,3 +134,5 @@ function normalizeTime(value) {
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
+
+module.exports = { syncGames };
