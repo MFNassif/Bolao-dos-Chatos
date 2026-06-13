@@ -20,13 +20,12 @@ export default function PredictionForm({ game, prediction, settings }) {
   const livePts = useMemo(() => {
     if (!prediction) return null;
     if (!Number.isInteger(game.homeScore) || !Number.isInteger(game.awayScore)) return null;
-    if (game.status === 'scheduled') return null;
     return scorePrediction(
       { home: prediction.homePrediction, away: prediction.awayPrediction },
       { home: game.homeScore, away: game.awayScore },
       settings
     );
-  }, [prediction, game.homeScore, game.awayScore, game.status, settings]);
+  }, [prediction, game.homeScore, game.awayScore, settings]);
 
   function onlyDigits(v) { return v.replace(/\D+/g, '').slice(0, 2); }
 

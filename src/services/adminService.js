@@ -38,6 +38,13 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   } else {
     payload.winner = null;
   }
+  // "Não começou" = sem resultado: limpa o placar para nao haver jogo
+  // scheduled com placar (que apareceria e contaria de forma inconsistente).
+  if (payload.status === 'scheduled') {
+    payload.homeScore = null;
+    payload.awayScore = null;
+    payload.winner = null;
+  }
 
   await writeBatch(db).set(gameRef, payload, { merge: true }).commit();
   // Recalcula a pontuacao deste jogo na hora: palpites -> usuarios -> ranking.
@@ -58,7 +65,6 @@ export async function recalculateGameScores(gameId, { recalculateUsers = true } 
   const game = gameSnap.data();
 
   const hasScore = Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
-  const isLive = game.status === 'live';
   const isFinished = game.status === 'finished';
   const predsSnap = await getDocs(query(collection(db, 'predictions'), where('gameId', '==', gameId)));
 
@@ -67,7 +73,9 @@ export async function recalculateGameScores(gameId, { recalculateUsers = true } 
   for (const p of predsSnap.docs) {
     const pd = p.data();
     let result = { points: 0, exactScoreHit: false, resultHit: false };
-    if (hasScore && (isLive || isFinished)) {
+    // Conta sempre que houver placar (os dois numeros). O status passa a ser
+    // apenas rotulo de exibicao (ao vivo/encerrado).
+    if (hasScore) {
       result = scorePrediction(
         { home: pd.homePrediction, away: pd.awayPrediction },
         { home: game.homeScore, away: game.awayScore }
@@ -358,9 +366,9 @@ async function getGameForPrediction(gameId, cache) {
 }
 
 function isScoreableGame(game) {
-  return (game.status === 'live' || game.status === 'finished') &&
-    Number.isInteger(game.homeScore) &&
-    Number.isInteger(game.awayScore);
+  // Um jogo conta pontos quando tem placar (os dois numeros). Jogos
+  // "scheduled" nao tem placar (o setGameResult limpa), entao ficam de fora.
+  return Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
 }
 
 async function deleteRefsInChunks(refs) {

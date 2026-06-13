@@ -27,7 +27,6 @@ async function recalculateGame(gameId, { recalculateUsers = true } = {}) {
   const game = gameSnap.data();
 
   const hasScore = Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
-  const isLive = game.status === 'live';
   const isFinished = game.status === 'finished';
   const preds = await firestore.collection('predictions').where('gameId', '==', gameId).get();
 
@@ -38,7 +37,8 @@ async function recalculateGame(gameId, { recalculateUsers = true } = {}) {
   for (const p of preds.docs) {
     const pd = p.data();
     let result = { points: 0, exactScoreHit: false, resultHit: false };
-    if (hasScore && (isLive || isFinished)) {
+    // Conta sempre que houver placar; status e apenas rotulo de exibicao.
+    if (hasScore) {
       result = scorePrediction(
         { home: pd.homePrediction, away: pd.awayPrediction },
         { home: game.homeScore, away: game.awayScore }
@@ -229,9 +229,8 @@ async function getGameForPrediction(gameId, cache) {
 }
 
 function isScoreableGame(game) {
-  return (game.status === 'live' || game.status === 'finished') &&
-    Number.isInteger(game.homeScore) &&
-    Number.isInteger(game.awayScore);
+  // Conta quando tem placar (os dois numeros); status e so rotulo de exibicao.
+  return Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore);
 }
 
 function toNumber(value, fallback) {

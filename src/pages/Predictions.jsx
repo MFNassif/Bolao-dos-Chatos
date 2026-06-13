@@ -180,7 +180,7 @@ export default function Predictions() {
               </p>
             </div>
             <div className="flex flex-col items-center justify-center" style={{ width: 120 }}>
-              {Number.isInteger(currentGame.homeScore) && currentGame.status !== 'scheduled' ? (
+              {Number.isInteger(currentGame.homeScore) && Number.isInteger(currentGame.awayScore) ? (
                 <div className="flex items-center justify-center gap-2 w-full">
                   <span className="w-9 h-9 rounded-xl bg-white/8 border border-white/10 flex items-center justify-center font-display text-xl text-white">
                     {currentGame.homeScore}
@@ -272,7 +272,6 @@ function FlagBox({ flag, code }) {
 function predictionScoreForGame(prediction, game, settings) {
   if (
     !game ||
-    game.status === 'scheduled' ||
     !Number.isInteger(game.homeScore) ||
     !Number.isInteger(game.awayScore)
   ) {

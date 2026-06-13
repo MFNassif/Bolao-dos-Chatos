@@ -28,8 +28,7 @@ export default function GameCard({ game, children }) {
 
   const hasScore =
     Number.isInteger(game.homeScore) &&
-    Number.isInteger(game.awayScore) &&
-    game.status !== 'scheduled';
+    Number.isInteger(game.awayScore);
 
   const homeName = bella ? getFullName(game.homeTeamCode, game.homeTeam) : (game.homeTeamCode || game.homeTeam);
   const awayName = bella ? getFullName(game.awayTeamCode, game.awayTeam) : (game.awayTeamCode || game.awayTeam);

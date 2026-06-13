@@ -342,6 +342,18 @@ function GameRow({ game, busy, onRun }) {
     });
   }
 
+  // Ao digitar um placar num jogo que ainda não começou, marca como "ao vivo".
+  // Sem isso o placar fica salvo mas NÃO conta pontos (jogo scheduled é ignorado).
+  function changeScore(setter, raw) {
+    const v = raw.replace(/\D+/g, '').slice(0, 2);
+    setter(v);
+    if (v !== '' && status === 'scheduled') setStatus('live');
+  }
+
+  // Vai contar pontos? (placar preenchido e jogo ao vivo/encerrado)
+  const willScore = home !== '' && away !== '' && (status === 'live' || status === 'finished');
+  const scoresButScheduled = home !== '' && away !== '' && status === 'scheduled';
+
   return (
     <article className="card bg-surface-2 p-4">
       <div className="flex items-center justify-between gap-3 mb-2">
@@ -377,16 +389,24 @@ function GameRow({ game, busy, onRun }) {
       ) : (
         <div className="space-y-2">
           <div className="flex items-center gap-2 flex-wrap">
-            <input inputMode="numeric" className="score-input !w-11 !h-11 !text-lg" value={home} onChange={e => setHome(e.target.value.replace(/\D+/g, '').slice(0,2))} aria-label="Placar mandante" />
+            <input inputMode="numeric" className="score-input !w-11 !h-11 !text-lg" value={home} onChange={e => changeScore(setHome, e.target.value)} aria-label="Placar mandante" />
             <span className="text-slate font-display text-xl">×</span>
-            <input inputMode="numeric" className="score-input !w-11 !h-11 !text-lg" value={away} onChange={e => setAway(e.target.value.replace(/\D+/g, '').slice(0,2))} aria-label="Placar visitante" />
+            <input inputMode="numeric" className="score-input !w-11 !h-11 !text-lg" value={away} onChange={e => changeScore(setAway, e.target.value)} aria-label="Placar visitante" />
             <select className="input !py-2 max-w-[170px]" value={status} onChange={e => setStatus(e.target.value)}>
               <option value="scheduled">⏳ Não começou</option>
               <option value="live">🔴 Ao vivo</option>
               <option value="finished">✅ Encerrado</option>
             </select>
           </div>
-          <p className="text-[11px] text-slate">O placar conta para a pontuação quando o jogo está <b>ao vivo</b> ou <b>encerrado</b>. Ao salvar, o ranking é recalculado na hora.</p>
+          {scoresButScheduled ? (
+            <p className="text-[11px] text-yellow-400">⚠️ Salvar como <b>“Não começou”</b> vai <b>apagar o placar</b>. Marque <b>Ao vivo</b> ou <b>Encerrado</b> para registrar o resultado.</p>
+          ) : (
+            <p className="text-[11px] text-slate">
+              {willScore
+                ? 'Ao salvar, este placar conta para a pontuação e o ranking é recalculado na hora.'
+                : 'O placar conta quando o jogo está ao vivo ou encerrado.'}
+            </p>
+          )}
           <div className="flex gap-2">
             <button className="btn-primary text-xs" disabled={busy} onClick={save}>Salvar e pontuar</button>
             <button className="btn-ghost text-xs" disabled={busy} onClick={() => setEditing(false)}>Cancelar</button>
