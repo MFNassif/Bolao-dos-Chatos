@@ -215,10 +215,12 @@ service cloud.firestore {
         request.resource.data.username == userAfter(request.auth.uid).username &&
         request.resource.data.displayName == userAfter(request.auth.uid).displayName &&
         request.resource.data.role == userAfter(request.auth.uid).role &&
-        request.resource.data.totalPoints == 0 &&
-        request.resource.data.exactScores == 0 &&
-        request.resource.data.correctResults == 0 &&
-        request.resource.data.predictionsCount == 0;
+        // Entra com os pontos que o usuario ja tem nas stats globais (escritas
+        // so por admin/recalc). Para um usuario novo essas stats sao 0.
+        request.resource.data.totalPoints == userAfter(request.auth.uid).totalPoints &&
+        request.resource.data.exactScores == userAfter(request.auth.uid).exactScores &&
+        request.resource.data.correctResults == userAfter(request.auth.uid).correctResults &&
+        request.resource.data.predictionsCount == userAfter(request.auth.uid).predictionsCount;
 
       allow update: if isSignedIn() &&
         resource.data.uid == request.auth.uid &&

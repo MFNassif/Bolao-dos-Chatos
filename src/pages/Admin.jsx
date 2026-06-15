@@ -281,7 +281,11 @@ function PoolsAdmin({ busy, onRun, user, profile }) {
 
 function GamesAdmin({ busy, onRun }) {
   const [games, setGames] = useState(null);
-  useEffect(() => subscribeGames(setGames), []);
+  useEffect(() => subscribeGames(next => {
+    // Nao deixa um snapshot vazio/erro transitorio apagar uma lista ja boa
+    // (isso desmontaria a linha em ediçao e fecharia o editor de placar).
+    setGames(prev => (prev && prev.length && (!next || !next.length)) ? prev : next);
+  }), []);
   if (games === null) return <Loading />;
   if (!games.length) return (
     <div className="card bg-surface-2 p-8 text-center text-slate text-sm">
@@ -302,19 +306,20 @@ const STATUS_LABELS = {
 };
 
 function GameRow({ game, busy, onRun }) {
-  const [home, setHome] = useState(game.homeScore ?? '');
-  const [away, setAway] = useState(game.awayScore ?? '');
-  const [status, setStatus] = useState(game.status || 'scheduled');
   const [editing, setEditing] = useState(false);
+  const [home, setHome] = useState('');
+  const [away, setAway] = useState('');
+  const [status, setStatus] = useState('scheduled');
 
-  // Mantém os inputs em sincronia quando o jogo muda externamente,
-  // exceto enquanto o admin está editando (para não apagar o que ele digita).
-  useEffect(() => {
-    if (editing) return;
-    setHome(game.homeScore ?? '');
-    setAway(game.awayScore ?? '');
+  // Abre o editor capturando o estado atual do jogo UMA vez. Enquanto edita,
+  // os campos sao estado local puro: snapshots em background nao os tocam
+  // (era o que travava o preenchimento e exigia trocar de aba).
+  function openEditor() {
+    setHome(Number.isInteger(game.homeScore) ? String(game.homeScore) : '');
+    setAway(Number.isInteger(game.awayScore) ? String(game.awayScore) : '');
     setStatus(game.status || 'scheduled');
-  }, [game.homeScore, game.awayScore, game.status, editing]);
+    setEditing(true);
+  }
 
   async function save() {
     await onRun('Salvar resultado', async () => {
@@ -372,7 +377,7 @@ function GameRow({ game, busy, onRun }) {
 
       {!editing ? (
         <div className="flex gap-2 flex-wrap">
-          <button className="btn-primary text-xs" onClick={() => setEditing(true)} disabled={busy}>Definir placar</button>
+          <button className="btn-primary text-xs" onClick={openEditor} disabled={busy}>Definir placar</button>
           {game.status !== 'live' && (
             <button className="btn-ghost text-xs text-red-400" disabled={busy}
               onClick={() => quickStatus('live', 'Jogo marcado como AO VIVO.')}>Iniciar (ao vivo)</button>

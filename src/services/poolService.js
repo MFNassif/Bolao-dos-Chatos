@@ -137,6 +137,19 @@ export async function joinPoolWithPassword({ user, profile, poolName, password }
 
   try {
     await runTransaction(db, async (tx) => {
+      // Leitura ANTES das escritas (exigencia da transacao). Semeia o novo
+      // membro com os pontos que o usuario ja tem (stats globais, escritas
+      // apenas por admin/recalc), para que entrar num bolao novo ja traga o
+      // historico em vez de comecar zerado.
+      const userSnap = await tx.get(userRef);
+      const u = userSnap.exists() ? userSnap.data() : {};
+      const stats = {
+        totalPoints: u.totalPoints || 0,
+        exactScores: u.exactScores || 0,
+        correctResults: u.correctResults || 0,
+        predictionsCount: u.predictionsCount || 0
+      };
+
       tx.set(accessRef, {
         poolId,
         uid: user.uid,
@@ -149,6 +162,7 @@ export async function joinPoolWithPassword({ user, profile, poolName, password }
       } else {
         tx.set(memberRef, {
           ...memberPayload({ poolId, poolName: cleanName, user, profile }),
+          ...stats,
           joinedAt: serverTimestamp()
         });
       }
