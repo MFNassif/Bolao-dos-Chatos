@@ -60,8 +60,16 @@ service cloud.firestore {
       return getAfter(/databases/$(database)/documents/users/$(uid)).data;
     }
 
+    // Bloqueio do palpite configuravel pelo admin (settings/app). Padrao: 1h
+    // antes. Se desligado, o palpite fecha no inicio do jogo (kickoff).
+    function lockOneHourBefore() {
+      return !exists(/databases/$(database)/documents/settings/app) ||
+        get(/databases/$(database)/documents/settings/app).data.get('lockOneHourBefore', true) != false;
+    }
+
     function gameLockTime(gameId) {
-      return get(/databases/$(database)/documents/games/$(gameId)).data.startTime - duration.value(1, 'h');
+      return get(/databases/$(database)/documents/games/$(gameId)).data.startTime -
+        (lockOneHourBefore() ? duration.value(1, 'h') : duration.value(0, 's'));
     }
 
     function isBeforeLock(gameId) {

@@ -2,23 +2,26 @@ import { useEffect, useMemo, useState } from 'react';
 import { formatTime, formatDate } from '../utils/dates';
 import { isLocked, lockTimeMs, formatCountdown } from '../utils/locks';
 import { useBella } from '../routes/BellaContext';
+import { useAuth } from '../routes/AuthContext';
 import { getFullName } from '../utils/teamNames';
 
 export default function GameCard({ game, children }) {
   const { bella } = useBella();
-  const locked = isLocked(game.startTime);
+  const { appSettings } = useAuth();
+  const lockOneHourBefore = appSettings?.lockOneHourBefore !== false;
+  const locked = isLocked(game.startTime, lockOneHourBefore);
   const [countdown, setCountdown] = useState(() =>
-    formatCountdown(lockTimeMs(game.startTime) - Date.now())
+    formatCountdown(lockTimeMs(game.startTime, lockOneHourBefore) - Date.now())
   );
 
   useEffect(() => {
     if (locked) return;
     const t = setInterval(
-      () => setCountdown(formatCountdown(lockTimeMs(game.startTime) - Date.now())),
+      () => setCountdown(formatCountdown(lockTimeMs(game.startTime, lockOneHourBefore) - Date.now())),
       30000
     );
     return () => clearInterval(t);
-  }, [game.startTime, locked]);
+  }, [game.startTime, locked, lockOneHourBefore]);
 
   const statusInfo = useMemo(() => {
     if (game.status === 'finished') return { label: 'Encerrado',  cls: 'bg-white/8 text-slate' };

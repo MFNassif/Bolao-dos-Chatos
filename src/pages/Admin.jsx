@@ -3,7 +3,7 @@ import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { subscribeGames } from '../services/gameService';
 import { setGameResult, recalculatePoolScores, setUserRole, removeUserFromPool } from '../services/adminService';
-import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, savePoolSettings } from '../services/settingsService';
+import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, savePoolSettings, subscribeAppSettings, saveAppSettings } from '../services/settingsService';
 import { createPool, getPoolMembers, getPoolsForAdmin, joinPoolWithPassword } from '../services/poolService';
 import { useAuth } from '../routes/AuthContext';
 import { formatDateTime } from '../utils/dates';
@@ -71,11 +71,66 @@ export default function Admin() {
         ))}
       </div>
 
-      {tab === 'settings' && <SettingsAdmin busy={busy} onRun={run} activePoolId={profile?.activePoolId} activePoolName={profile?.activePoolName} />}
+      {tab === 'settings' && (
+        <div className="space-y-4">
+          <AppLockSettings busy={busy} onRun={run} />
+          <SettingsAdmin busy={busy} onRun={run} activePoolId={profile?.activePoolId} activePoolName={profile?.activePoolName} />
+        </div>
+      )}
       {tab === 'pools'    && <PoolsAdmin busy={busy} onRun={run} user={user} profile={profile} />}
       {tab === 'games'    && <GamesAdmin busy={busy} onRun={run} />}
       {tab === 'users'    && <UsersAdmin busy={busy} onRun={run} activePoolId={profile?.activePoolId} currentUid={user?.uid} />}
       {tab === 'logs'     && <LogsAdmin />}
+    </div>
+  );
+}
+
+// ─── Bloqueio global de palpites ───────────────────────────────────────────────
+function AppLockSettings({ busy, onRun }) {
+  const [settings, setSettings] = useState(null);
+  useEffect(() => subscribeAppSettings(setSettings), []);
+  if (!settings) return <Loading />;
+
+  const enabled = settings.lockOneHourBefore !== false;
+
+  async function toggle() {
+    await onRun('Bloqueio de palpite', async () => {
+      await saveAppSettings({ lockOneHourBefore: !enabled });
+      return {
+        message: !enabled
+          ? 'Bloqueio ligado: palpites fecham 1h antes do jogo.'
+          : 'Bloqueio desligado: palpites podem ser editados até o início do jogo.'
+      };
+    });
+  }
+
+  return (
+    <div className="card bg-surface-2 p-4 space-y-3">
+      <div>
+        <h3 className="font-display text-base text-white tracking-wider">🔒 BLOQUEIO DE PALPITES</h3>
+        <p className="text-xs text-slate mt-1">Configuração global — vale para todos os bolões.</p>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-white">Bloquear 1 hora antes do jogo</p>
+          <p className="text-[11px] text-slate mt-0.5">
+            {enabled
+              ? 'Ligado: o palpite trava 1h antes do início do jogo.'
+              : 'Desligado: dá para editar o palpite até o horário de início do jogo.'}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          disabled={busy}
+          onClick={toggle}
+          title={enabled ? 'Desligar bloqueio' : 'Ligar bloqueio'}
+          className={`relative w-12 h-7 rounded-full transition shrink-0 disabled:opacity-50 ${enabled ? 'bg-green' : 'bg-white/15'}`}
+        >
+          <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${enabled ? 'left-6' : 'left-1'}`} />
+        </button>
+      </div>
     </div>
   );
 }

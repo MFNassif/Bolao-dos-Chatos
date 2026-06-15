@@ -50,11 +50,11 @@ export function subscribePoolPredictionsForGame(poolId, gameId, callback) {
   });
 }
 
-export async function savePrediction({ user, profile, game, home, away, existingPrediction = null }) {
+export async function savePrediction({ user, profile, game, home, away, existingPrediction = null, lockOneHourBefore = true }) {
   if (!game) throw new Error('Jogo inválido.');
   if (!user?.uid) throw new Error('Usuário não autenticado.');
   if (!profile?.username) throw new Error('Perfil ainda não carregou. Tente novamente em alguns segundos.');
-  if (isLocked(game.startTime)) throw new Error('Palpite bloqueado.');
+  if (isLocked(game.startTime, lockOneHourBefore)) throw new Error('Palpite bloqueado.');
 
   const h = Number(home);
   const a = Number(away);

@@ -11,6 +11,30 @@ export const DEFAULT_POOL_SETTINGS = {
   correctResultPoints: 1
 };
 
+// Configuracoes globais do app (valem para todos os boloes), em settings/app.
+export const APP_SETTINGS_DOC = 'app';
+export const DEFAULT_APP_SETTINGS = {
+  // true = palpite bloqueia 1h antes do jogo; false = bloqueia no inicio do jogo.
+  lockOneHourBefore: true
+};
+
+export function subscribeAppSettings(callback) {
+  const ref = doc(db, 'settings', APP_SETTINGS_DOC);
+  return onSnapshot(ref, (snap) => {
+    callback(snap.exists() ? { ...DEFAULT_APP_SETTINGS, ...snap.data() } : DEFAULT_APP_SETTINGS);
+  }, (err) => {
+    console.warn('Falha ao carregar configuracoes do app.', err);
+    callback(DEFAULT_APP_SETTINGS);
+  });
+}
+
+export async function saveAppSettings(data) {
+  await setDoc(doc(db, 'settings', APP_SETTINGS_DOC), {
+    lockOneHourBefore: data.lockOneHourBefore !== false,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
 export function subscribePoolSettings(poolId, callback) {
   if (!poolId) {
     callback(DEFAULT_POOL_SETTINGS);

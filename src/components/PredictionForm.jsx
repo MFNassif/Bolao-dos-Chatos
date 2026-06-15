@@ -5,8 +5,9 @@ import { scorePrediction } from '../utils/scoring';
 import { useAuth } from '../routes/AuthContext';
 
 export default function PredictionForm({ game, prediction, settings }) {
-  const { user, profile } = useAuth();
-  const locked = isLocked(game.startTime);
+  const { user, profile, appSettings } = useAuth();
+  const lockOneHourBefore = appSettings?.lockOneHourBefore !== false;
+  const locked = isLocked(game.startTime, lockOneHourBefore);
   const [home, setHome] = useState(prediction?.homePrediction ?? '');
   const [away, setAway] = useState(prediction?.awayPrediction ?? '');
   const [saving, setSaving] = useState(false);
@@ -44,7 +45,8 @@ export default function PredictionForm({ game, prediction, settings }) {
         game,
         home: Number(home),
         away: Number(away),
-        existingPrediction: prediction
+        existingPrediction: prediction,
+        lockOneHourBefore
       });
       setMsg({ type: 'success', text: 'Salvo!' });
     } catch (err) {

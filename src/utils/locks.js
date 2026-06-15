@@ -1,22 +1,28 @@
 import { toMillis } from './dates';
 
-// Bloqueio do palpite: 1h antes do início do jogo.
+// Bloqueio do palpite: por padrao 1h antes do inicio do jogo.
+// O admin pode desligar esse bloqueio de 1h; nesse caso o palpite fecha
+// no horario de inicio do jogo (kickoff), nunca depois.
 export const LOCK_OFFSET_MS = 60 * 60 * 1000;
 
-export function lockTimeMs(startTime) {
-  const ms = toMillis(startTime);
-  if (!ms) return 0;
-  return ms - LOCK_OFFSET_MS;
+export function lockOffsetMs(lockOneHourBefore = true) {
+  return lockOneHourBefore === false ? 0 : LOCK_OFFSET_MS;
 }
 
-export function isLocked(startTime, now = Date.now()) {
-  const lock = lockTimeMs(startTime);
+export function lockTimeMs(startTime, lockOneHourBefore = true) {
+  const ms = toMillis(startTime);
+  if (!ms) return 0;
+  return ms - lockOffsetMs(lockOneHourBefore);
+}
+
+export function isLocked(startTime, lockOneHourBefore = true, now = Date.now()) {
+  const lock = lockTimeMs(startTime, lockOneHourBefore);
   if (!lock) return true;
   return now >= lock;
 }
 
-export function timeUntilLock(startTime, now = Date.now()) {
-  return lockTimeMs(startTime) - now;
+export function timeUntilLock(startTime, lockOneHourBefore = true, now = Date.now()) {
+  return lockTimeMs(startTime, lockOneHourBefore) - now;
 }
 
 export function formatCountdown(ms) {

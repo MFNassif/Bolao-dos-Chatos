@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, authPersistenceReady, db } from './services/firebase';
+import { subscribeAppSettings, DEFAULT_APP_SETTINGS } from './services/settingsService';
 import { AuthContext } from './routes/AuthContext';
 import { BellaProvider } from './routes/BellaContext';
 import ProtectedRoute from './routes/ProtectedRoute';
@@ -21,6 +22,7 @@ export default function App() {
   const [profile, setProfile]     = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [profileReady, setProfileReady] = useState(true);
+  const [appSettings, setAppSettings] = useState(DEFAULT_APP_SETTINGS);
 
   useEffect(() => {
     let unsubscribe = null;
@@ -50,11 +52,17 @@ export default function App() {
     return unsub;
   }, [user]);
 
+  // Configuracoes globais (ex.: bloqueio de palpite 1h antes). Exige login.
+  useEffect(() => {
+    if (!user) { setAppSettings(DEFAULT_APP_SETTINGS); return; }
+    return subscribeAppSettings(setAppSettings);
+  }, [user]);
+
   if (!authReady || (user && !profileReady)) return <Loading fullscreen />;
 
   return (
     <BellaProvider>
-      <AuthContext.Provider value={{ user, profile }}>
+      <AuthContext.Provider value={{ user, profile, appSettings }}>
         <Routes>
           <Route path="/login"    element={user ? <Navigate to="/" replace /> : <Login />} />
           <Route path="/register" element={user ? <Navigate to="/" replace /> : <Register />} />
