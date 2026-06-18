@@ -10,7 +10,8 @@ import PoolGate from './PoolGate';
 import PoolSwitcher from './PoolSwitcher';
 
 export default function Layout() {
-  const { user, profile } = useAuth();
+  const { user, profile, appSettings } = useAuth();
+  const lockOneHourBefore = appSettings?.lockOneHourBefore !== false;
   const { bella, toggle } = useBella();
   const navigate        = useNavigate();
   const [showRules, setShowRules] = useState(false);
@@ -169,43 +170,34 @@ export default function Layout() {
                   </div>
                 </div>
               )}
-              <p className="text-[11px] text-slate">Palpites bloqueiam 1h antes do jogo. Ranking atualiza em tempo real durante os jogos.</p>
+              <div>
+                <p className="text-[10px] text-slate uppercase tracking-wider font-bold mb-2">Critérios de desempate</p>
+                <ol className="space-y-1 text-[11px] text-white/80">
+                  <li><span className="text-slate font-semibold mr-1">1.</span>Mais pontos</li>
+                  <li><span className="text-slate font-semibold mr-1">2.</span>Mais cravadas (placar exato)</li>
+                  <li><span className="text-slate font-semibold mr-1">3.</span>Placar mais perto (menor erro de gols)</li>
+                  <li><span className="text-slate font-semibold mr-1">4.</span>Mais palpites feitos</li>
+                </ol>
+                <p className="text-[11px] text-slate mt-1.5">Persistindo o empate, o prêmio é dividido.</p>
+              </div>
+              <p className="text-[11px] text-slate">
+                {lockOneHourBefore
+                  ? 'Palpites bloqueiam 1h antes do início do jogo.'
+                  : 'Palpites podem ser editados até o início do jogo.'}
+                {' '}O ranking é atualizado conforme os resultados são lançados.
+              </p>
             </div>
           </div>
         )}
       </header>
 
-      {/* Barra mobile: regras + modo diva info */}
+      {/* Barra mobile: abre o mesmo painel de regras (acima) */}
       <div className="sm:hidden px-4 pt-3 flex gap-2">
         <button onClick={() => setShowRules(!showRules)}
           className="flex-1 flex items-center justify-center gap-2 py-2 rounded-xl bg-white/6 border border-white/8 text-xs font-semibold text-slate">
           <InfoIcon /> {showRules ? 'Fechar' : 'Regras e premiação'}
         </button>
       </div>
-
-      {/* Painel de regras mobile */}
-      {showRules && (
-        <div className="sm:hidden mx-4 mt-2 card p-3 space-y-3">
-          {scoring.map(r => (
-            <div key={r.key} className={`${r.bg} rounded-lg p-2 flex items-center gap-3`}>
-              <span className={`font-display text-2xl w-8 text-center ${r.color}`}>{r.pts}</span>
-              <span className="text-xs text-white/80">{r.label}</span>
-            </div>
-          ))}
-          {prizes && settings && (
-            <div className="pt-2 border-t border-white/8">
-              <p className="text-[11px] text-slate mb-2">
-                Prêmio total: <span className="text-green-light font-bold">{settings.currency} {prizes.total}</span>
-              </p>
-              <div className="grid grid-cols-3 gap-1.5 text-center text-[11px]">
-                <div className="bg-yellow-500/15 rounded-lg p-2"><p className="text-yellow-400 font-display text-base">{settings.currency} {prizes.first}</p><p className="text-slate">1º lugar</p></div>
-                <div className="bg-white/8 rounded-lg p-2"><p className="text-slate font-display text-base">{settings.currency} {prizes.second}</p><p className="text-slate">2º lugar</p></div>
-                <div className="bg-amber-900/20 rounded-lg p-2"><p className="text-amber-600 font-display text-base">{settings.currency} {prizes.third}</p><p className="text-slate">3º lugar</p></div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Banner Modo Diva ativo */}
       {bella && (
