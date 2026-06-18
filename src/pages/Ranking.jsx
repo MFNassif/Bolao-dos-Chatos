@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../routes/AuthContext';
-import { subscribeRanking } from '../services/rankingService';
+import { subscribeRanking, compareRanking } from '../services/rankingService';
 import { subscribeLiveGames } from '../services/gameService';
 import { subscribePoolSettings, calcPrizes } from '../services/settingsService';
 import RankingTable from '../components/RankingTable';
@@ -44,8 +44,9 @@ export default function Ranking() {
 
   if (rows === null) return <Loading />;
 
-  const top3 = [...rows].sort((a, b) => (b.totalPoints || 0) - (a.totalPoints || 0)).slice(0, 3);
-  const myPos = rows.findIndex(u => u.uid === user.uid) + 1;
+  const ranked = [...rows].sort(compareRanking);
+  const top3 = ranked.slice(0, 3);
+  const myPos = ranked.findIndex(u => u.uid === user.uid) + 1;
   const myRow = rows.find(u => u.uid === user.uid);
 
   return (
@@ -172,6 +173,10 @@ export default function Ranking() {
       </div>
 
       <RankingTable rows={rows} currentUid={user.uid} sortBy={sortBy} />
+
+      <p className="text-[11px] text-slate text-center px-2">
+        Desempate: 1) mais pontos · 2) mais cravadas · 3) placar mais perto (menor erro de gols) · 4) mais palpites. Persistindo o empate, o prêmio é dividido.
+      </p>
     </div>
   );
 }

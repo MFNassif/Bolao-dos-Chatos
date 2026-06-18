@@ -1,8 +1,12 @@
+import { compareRanking } from '../services/rankingService';
+
 export default function RankingTable({ rows, currentUid, sortBy = 'points' }) {
   const sorted = [...rows].sort((a, b) => {
-    if (sortBy === 'exact') return (b.exactScores || 0) - (a.exactScores || 0);
-    if (sortBy === 'results') return (b.correctResults || 0) - (a.correctResults || 0);
-    return (b.totalPoints || 0) - (a.totalPoints || 0) || (b.exactScores || 0) - (a.exactScores || 0);
+    // Os botoes de ordenar usam o stat escolhido como chave; em empate, cai na
+    // cadeia oficial. "Pontos" usa a cadeia completa (ordem de premiacao).
+    if (sortBy === 'exact') return (b.exactScores || 0) - (a.exactScores || 0) || compareRanking(a, b);
+    if (sortBy === 'results') return (b.correctResults || 0) - (a.correctResults || 0) || compareRanking(a, b);
+    return compareRanking(a, b);
   });
 
   if (!sorted.length) {

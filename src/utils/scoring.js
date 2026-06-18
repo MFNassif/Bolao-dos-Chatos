@@ -50,3 +50,19 @@ function outcome(h, a) {
   if (h < a) return 'away';
   return 'draw';
 }
+
+/**
+ * Erro de gols de um palpite vs o resultado real: |casa| + |fora|.
+ * Quanto menor, mais perto o palpite chegou. Usado como criterio de desempate.
+ * Retorna 0 quando faltam dados (nao penaliza).
+ */
+export function goalError(prediction, actual) {
+  if (
+    !prediction || !actual ||
+    !Number.isInteger(prediction.home) || !Number.isInteger(prediction.away) ||
+    !Number.isInteger(actual.home) || !Number.isInteger(actual.away)
+  ) {
+    return 0;
+  }
+  return Math.abs(prediction.home - actual.home) + Math.abs(prediction.away - actual.away);
+}

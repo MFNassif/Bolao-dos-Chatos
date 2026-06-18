@@ -34,4 +34,16 @@ function scorePrediction(prediction, actual, settings = DEFAULT_SCORING) {
   return { points: 0, exactScoreHit: false, resultHit: false };
 }
 
-module.exports = { scorePrediction, POINTS_EXACT, POINTS_RESULT, DEFAULT_SCORING };
+// Erro de gols: |casa| + |fora|. Menor = mais perto. Criterio de desempate.
+function goalError(prediction, actual) {
+  if (
+    !prediction || !actual ||
+    !Number.isInteger(prediction.home) || !Number.isInteger(prediction.away) ||
+    !Number.isInteger(actual.home) || !Number.isInteger(actual.away)
+  ) {
+    return 0;
+  }
+  return Math.abs(prediction.home - actual.home) + Math.abs(prediction.away - actual.away);
+}
+
+module.exports = { scorePrediction, goalError, POINTS_EXACT, POINTS_RESULT, DEFAULT_SCORING };

@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { DEFAULT_POOL_SETTINGS } from './settingsService';
-import { scorePrediction } from '../utils/scoring';
+import { scorePrediction, goalError } from '../utils/scoring';
 
 export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   const gameRef = doc(db, 'games', gameId);
@@ -73,10 +73,15 @@ export async function recalculateGameScores(gameId, { recalculateUsers = true } 
   for (const p of predsSnap.docs) {
     const pd = p.data();
     let result = { points: 0, exactScoreHit: false, resultHit: false };
+    let ge = 0;
     // Conta sempre que houver placar (os dois numeros). O status passa a ser
     // apenas rotulo de exibicao (ao vivo/encerrado).
     if (hasScore) {
       result = scorePrediction(
+        { home: pd.homePrediction, away: pd.awayPrediction },
+        { home: game.homeScore, away: game.awayScore }
+      );
+      ge = goalError(
         { home: pd.homePrediction, away: pd.awayPrediction },
         { home: game.homeScore, away: game.awayScore }
       );
@@ -85,6 +90,7 @@ export async function recalculateGameScores(gameId, { recalculateUsers = true } 
       points: result.points,
       exactScoreHit: result.exactScoreHit,
       resultHit: result.resultHit,
+      goalError: ge,
       isFinalized: isFinished
     };
     if (isFinished) update.lockedAt = serverTimestamp();
@@ -106,18 +112,21 @@ export async function recalculateUserAggregates(uid) {
   let totalPoints = 0;
   let exactScores = 0;
   let correctResults = 0;
+  let goalErrorSum = 0;
 
   for (const p of snap.docs) {
     const d = p.data();
     totalPoints += d.points || 0;
     if (d.exactScoreHit) exactScores += 1;
     if (d.resultHit) correctResults += 1;
+    goalErrorSum += d.goalError || 0;
   }
 
   await writeBatch(db).set(doc(db, 'users', uid), {
     totalPoints,
     exactScores,
     correctResults,
+    goalError: goalErrorSum,
     predictionsCount: snap.size,
     lastScoreUpdate: serverTimestamp()
   }, { merge: true }).commit();
@@ -166,6 +175,7 @@ export async function recalculatePoolScores(poolId) {
       totalPoints: 0,
       exactScores: 0,
       correctResults: 0,
+      goalError: 0,
       predictionsCount: 0
     });
   });
@@ -198,6 +208,10 @@ export async function recalculatePoolScores(poolId) {
       agg.totalPoints += result.points || 0;
       if (result.exactScoreHit) agg.exactScores += 1;
       if (result.resultHit) agg.correctResults += 1;
+      agg.goalError += goalError(
+        { home: pred.homePrediction, away: pred.awayPrediction },
+        { home: game.homeScore, away: game.awayScore }
+      );
     });
   }
 
@@ -324,6 +338,7 @@ async function recalculatePoolMemberAggregate(memberDoc) {
   let totalPoints = 0;
   let exactScores = 0;
   let correctResults = 0;
+  let goalErrorSum = 0;
 
   for (const p of predsSnap.docs) {
     const pred = p.data();
@@ -338,12 +353,17 @@ async function recalculatePoolMemberAggregate(memberDoc) {
     totalPoints += result.points || 0;
     if (result.exactScoreHit) exactScores += 1;
     if (result.resultHit) correctResults += 1;
+    goalErrorSum += goalError(
+      { home: pred.homePrediction, away: pred.awayPrediction },
+      { home: game.homeScore, away: game.awayScore }
+    );
   }
 
   await writeBatch(db).set(memberDoc.ref, {
     totalPoints,
     exactScores,
     correctResults,
+    goalError: goalErrorSum,
     predictionsCount: predsSnap.size,
     updatedAt: serverTimestamp()
   }, { merge: true }).commit();

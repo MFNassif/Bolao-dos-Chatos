@@ -1,5 +1,5 @@
 const { admin, db } = require('./firebase');
-const { scorePrediction } = require('./scoring');
+const { scorePrediction, goalError } = require('./scoring');
 
 const DEFAULT_POOL_SETTINGS = {
   betAmount: 50,
@@ -37,9 +37,14 @@ async function recalculateGame(gameId, { recalculateUsers = true } = {}) {
   for (const p of preds.docs) {
     const pd = p.data();
     let result = { points: 0, exactScoreHit: false, resultHit: false };
+    let ge = 0;
     // Conta sempre que houver placar; status e apenas rotulo de exibicao.
     if (hasScore) {
       result = scorePrediction(
+        { home: pd.homePrediction, away: pd.awayPrediction },
+        { home: game.homeScore, away: game.awayScore }
+      );
+      ge = goalError(
         { home: pd.homePrediction, away: pd.awayPrediction },
         { home: game.homeScore, away: game.awayScore }
       );
@@ -49,6 +54,7 @@ async function recalculateGame(gameId, { recalculateUsers = true } = {}) {
       (pd.points || 0) !== result.points ||
       !!pd.exactScoreHit !== result.exactScoreHit ||
       !!pd.resultHit !== result.resultHit ||
+      (pd.goalError || 0) !== ge ||
       !!pd.isFinalized !== isFinished;
     if (!changed) continue;
 
@@ -56,6 +62,7 @@ async function recalculateGame(gameId, { recalculateUsers = true } = {}) {
       points: result.points,
       exactScoreHit: result.exactScoreHit,
       resultHit: result.resultHit,
+      goalError: ge,
       isFinalized: isFinished
     };
     if (isFinished) {
@@ -128,17 +135,20 @@ async function recalculateUserAggregates(uid, caches = {}) {
   let totalPoints = 0;
   let exactScores = 0;
   let correctResults = 0;
+  let goalErrorSum = 0;
   for (const p of snap.docs) {
     const d = p.data();
     totalPoints += d.points || 0;
     if (d.exactScoreHit) exactScores += 1;
     if (d.resultHit) correctResults += 1;
+    goalErrorSum += d.goalError || 0;
   }
 
   await firestore.collection('users').doc(uid).set({
     totalPoints,
     exactScores,
     correctResults,
+    goalError: goalErrorSum,
     predictionsCount: snap.size,
     lastScoreUpdate: admin.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
@@ -185,6 +195,7 @@ async function recalculatePoolMemberAggregate(memberDoc, predDocs, caches) {
   let totalPoints = 0;
   let exactScores = 0;
   let correctResults = 0;
+  let goalErrorSum = 0;
 
   for (const p of predDocs) {
     const pred = p.data();
@@ -198,12 +209,17 @@ async function recalculatePoolMemberAggregate(memberDoc, predDocs, caches) {
     totalPoints += result.points || 0;
     if (result.exactScoreHit) exactScores += 1;
     if (result.resultHit) correctResults += 1;
+    goalErrorSum += goalError(
+      { home: pred.homePrediction, away: pred.awayPrediction },
+      { home: game.homeScore, away: game.awayScore }
+    );
   }
 
   await memberDoc.ref.set({
     totalPoints,
     exactScores,
     correctResults,
+    goalError: goalErrorSum,
     predictionsCount: predDocs.length,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
