@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { DEFAULT_POOL_SETTINGS } from './settingsService';
-import { scorePrediction, goalError } from '../utils/scoring';
+import { scorePrediction, goalError, POINTS_EXACT, POINTS_RESULT } from '../utils/scoring';
 
 export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   const gameRef = doc(db, 'games', gameId);
@@ -47,8 +47,11 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   }
 
   await writeBatch(db).set(gameRef, payload, { merge: true }).commit();
-  // Recalcula a pontuacao deste jogo na hora: palpites -> usuarios -> ranking.
-  await recalculateGameScores(gameId);
+  // Atualiza os palpites deste jogo (points/goalError/lockedAt) e em seguida
+  // recalcula TODOS os boloes — assim o ranking de todos fica certo na hora,
+  // sem precisar do botao "Recalcular" manual.
+  await recalculateGameScores(gameId, { recalculateUsers: false });
+  await recalculateAllPools();
 
   const logRef = doc(collection(db, 'syncLogs'));
   await writeBatch(db).set(logRef, {
@@ -158,6 +161,97 @@ export async function recalculateAllScores() {
   }).commit();
 
   return { predictions: totalPreds, users: usersSnap.size };
+}
+
+/**
+ * Recalculo COMPLETO e eficiente de TODOS os boloes + agregados globais.
+ * Le cada jogo, cada palpite e cada bolao uma unica vez. Roda automaticamente
+ * a cada alteracao de placar (setGameResult), entao o ranking de todos os
+ * boloes fica sempre certo sem precisar do botao manual.
+ */
+export async function recalculateAllPools() {
+  const [gamesSnap, membersSnap, poolsSnap, predsSnap] = await Promise.all([
+    getDocs(collection(db, 'games')),
+    getDocs(collection(db, 'poolMembers')),
+    getDocs(collection(db, 'pools')),
+    getDocs(collection(db, 'predictions'))
+  ]);
+
+  const gameById = new Map(gamesSnap.docs.map(g => [g.id, g.data()]));
+  const settingsByPool = new Map(
+    poolsSnap.docs.map(p => [p.id, { ...DEFAULT_POOL_SETTINGS, ...p.data() }])
+  );
+
+  // Acertos por usuario (so jogos com placar). exact/result independem da
+  // pontuacao do bolao; o erro de gols tambem. So o total de pontos varia
+  // conforme as configuracoes de cada bolao.
+  const hitsByUid = new Map();
+  const countByUid = new Map();
+  for (const p of predsSnap.docs) {
+    const pred = p.data();
+    if (!pred.userId) continue;
+    countByUid.set(pred.userId, (countByUid.get(pred.userId) || 0) + 1);
+    const game = gameById.get(pred.gameId);
+    if (!game || !isScoreableGame(game)) continue;
+    const res = scorePrediction(
+      { home: pred.homePrediction, away: pred.awayPrediction },
+      { home: game.homeScore, away: game.awayScore }
+    );
+    const ge = goalError(
+      { home: pred.homePrediction, away: pred.awayPrediction },
+      { home: game.homeScore, away: game.awayScore }
+    );
+    if (!hitsByUid.has(pred.userId)) hitsByUid.set(pred.userId, []);
+    hitsByUid.get(pred.userId).push({ exact: res.exactScoreHit, result: res.resultHit, ge });
+  }
+
+  function aggregate(uid, exactPts, resultPts) {
+    let totalPoints = 0, exactScores = 0, correctResults = 0, goalErrorSum = 0;
+    for (const h of (hitsByUid.get(uid) || [])) {
+      if (h.exact) { totalPoints += exactPts; exactScores += 1; correctResults += 1; }
+      else if (h.result) { totalPoints += resultPts; correctResults += 1; }
+      goalErrorSum += h.ge;
+    }
+    return { totalPoints, exactScores, correctResults, goalError: goalErrorSum };
+  }
+
+  let batch = writeBatch(db);
+  let ops = 0;
+  async function flush(force) {
+    if (force ? ops > 0 : ops >= 400) { await batch.commit(); batch = writeBatch(db); ops = 0; }
+  }
+
+  // Agregado global por usuario (pontuacao padrao) — base p/ semear novos boloes.
+  for (const uid of countByUid.keys()) {
+    const agg = aggregate(uid, POINTS_EXACT, POINTS_RESULT);
+    batch.set(doc(db, 'users', uid), {
+      ...agg,
+      predictionsCount: countByUid.get(uid) || 0,
+      lastScoreUpdate: serverTimestamp()
+    }, { merge: true });
+    ops += 1;
+    await flush();
+  }
+
+  // Agregado por membro de cada bolao (pontuacao do bolao).
+  for (const member of membersSnap.docs) {
+    const md = member.data();
+    if (!md.uid) continue;
+    const s = settingsByPool.get(md.poolId) || DEFAULT_POOL_SETTINGS;
+    const exactPts = Number.isFinite(Number(s.exactScorePoints)) ? Number(s.exactScorePoints) : POINTS_EXACT;
+    const resultPts = Number.isFinite(Number(s.correctResultPoints)) ? Number(s.correctResultPoints) : POINTS_RESULT;
+    const agg = aggregate(md.uid, exactPts, resultPts);
+    batch.set(member.ref, {
+      ...agg,
+      predictionsCount: countByUid.get(md.uid) || 0,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    ops += 1;
+    await flush();
+  }
+  await flush(true);
+
+  return { pools: poolsSnap.size, members: membersSnap.size, users: countByUid.size };
 }
 
 export async function recalculatePoolScores(poolId) {

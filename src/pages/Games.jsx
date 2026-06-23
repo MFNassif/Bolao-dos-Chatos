@@ -79,7 +79,13 @@ export default function Games() {
       if (!map.has(grp)) map.set(grp, []);
       map.get(grp).push(g);
     });
-    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+    return Array.from(map.entries()).sort(([a], [b]) => {
+      // Fase Final (jogos sem grupo) sempre por último, depois dos grupos A–H.
+      if (a === b) return 0;
+      if (a === 'Fase Final') return 1;
+      if (b === 'Fase Final') return -1;
+      return a.localeCompare(b);
+    });
   }, [filtered, activeGroup]);
 
   /* agrupado por data (view === 'chrono') */

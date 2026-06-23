@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { subscribeGames } from '../services/gameService';
-import { setGameResult, recalculatePoolScores, setUserRole, removeUserFromPool } from '../services/adminService';
+import { setGameResult, recalculatePoolScores, recalculateAllPools, setUserRole, removeUserFromPool } from '../services/adminService';
 import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, savePoolSettings, subscribeAppSettings, saveAppSettings } from '../services/settingsService';
 import { createPool, getPoolMembers, getPoolsForAdmin, joinPoolWithPassword } from '../services/poolService';
 import { useAuth } from '../routes/AuthContext';
@@ -47,9 +47,9 @@ export default function Admin() {
       <div className="card bg-surface-2 p-4 space-y-3">
         <h3 className="text-[11px] text-slate font-bold uppercase tracking-wider">Ações rápidas</h3>
         <div className="flex flex-wrap gap-2">
-          <button disabled={busy || !profile?.activePoolId} className="btn-gold" onClick={() => run('Recalcular', async () => {
-            const r = await recalculatePoolScores(profile.activePoolId);
-            return { message: `Recálculo: ${r.predictions} palpites · ${r.users} usuários.` };
+          <button disabled={busy} className="btn-gold" onClick={() => run('Recalcular', async () => {
+            const r = await recalculateAllPools();
+            return { message: `Recálculo de todos os bolões: ${r.members} membros · ${r.pools} bolões.` };
           })}>
             Recalcular pontuação
           </button>
