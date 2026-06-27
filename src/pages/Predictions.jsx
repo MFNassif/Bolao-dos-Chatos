@@ -8,6 +8,7 @@ import { formatTime, formatDate } from '../utils/dates';
 import { useBella } from '../routes/BellaContext';
 import { useAuth } from '../routes/AuthContext';
 import { getFullName } from '../utils/teamNames';
+import { stageLabel } from '../utils/stages';
 import { scorePrediction } from '../utils/scoring';
 import Loading from '../components/Loading';
 
