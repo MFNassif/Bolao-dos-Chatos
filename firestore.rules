@@ -356,7 +356,9 @@ service cloud.firestore {
     }
 
     match /knockoutPredictions/{uid} {
-      allow read: if isSelf(uid) || isAdmin();
+      // O dono e o admin sempre leem; os demais participantes so depois do
+      // prazo (28/06 15:00), para ninguem copiar palpite antes do fechamento.
+      allow read: if isSelf(uid) || isAdmin() || (isSignedIn() && !knockoutOpen());
 
       allow create, update: if isSelf(uid) &&
         knockoutOpen() &&

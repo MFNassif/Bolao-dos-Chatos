@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../routes/AuthContext';
 import { useBella } from '../routes/BellaContext';
 import { subscribeGames } from '../services/gameService';
-import { subscribeMyKnockout, saveMyKnockout } from '../services/knockoutService';
+import { subscribeMyKnockout, saveMyKnockout, getKnockoutPicks } from '../services/knockoutService';
 import { subscribePoolSettings } from '../services/settingsService';
+import { getPoolMembers } from '../services/poolService';
 import {
   buildBracket, resolveSlotTeams, isKnockoutLocked, parentChainIds,
   effectiveAdvanceSide, slotId, KNOCKOUT_DEADLINE_MS
@@ -20,6 +21,9 @@ export default function MataMata() {
   const [savedDoc, setSavedDoc] = useState(null);
   const [picks, setPicks] = useState(null);
   const [save, setSave] = useState('idle');
+  const [members, setMembers] = useState([]);
+  const [viewUid, setViewUid] = useState(user.uid);
+  const [otherPicks, setOtherPicks] = useState({});
   const locked = isKnockoutLocked();
   const firstLoad = useRef(true);
 
@@ -29,6 +33,24 @@ export default function MataMata() {
     if (!profile?.activePoolId) { setSettings(null); return; }
     return subscribePoolSettings(profile.activePoolId, setSettings);
   }, [profile?.activePoolId]);
+
+  // Participantes do bolão (para ver o chaveamento de outros após o prazo).
+  useEffect(() => {
+    if (!profile?.activePoolId) { setMembers([]); return; }
+    let cancelled = false;
+    getPoolMembers(profile.activePoolId)
+      .then((list) => { if (!cancelled) setMembers([...list].sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''))); })
+      .catch(() => { if (!cancelled) setMembers([]); });
+    return () => { cancelled = true; };
+  }, [profile?.activePoolId]);
+
+  // Carrega o chaveamento do participante selecionado (quando não for o meu).
+  useEffect(() => {
+    if (viewUid === user.uid) return;
+    let cancelled = false;
+    getKnockoutPicks(viewUid).then((p) => { if (!cancelled) setOtherPicks(p || {}); }).catch(() => { if (!cancelled) setOtherPicks({}); });
+    return () => { cancelled = true; };
+  }, [viewUid, user.uid]);
   const winnerPts = 2 * (settings?.correctResultPoints ?? 1);
   const cravadaPts = 2 * (settings?.exactScorePoints ?? 5);
   useEffect(() => { if (savedDoc && picks === null) setPicks(savedDoc.picks || {}); }, [savedDoc, picks]);
@@ -121,17 +143,36 @@ export default function MataMata() {
 
   if (games === null || picks === null || bracket === null) return <Loading />;
 
+  const viewingOther = viewUid !== user.uid;
+  const displayPicks = viewingOther ? otherPicks : picks;
+  const editable = !locked && !viewingOther;
+  const viewName = members.find((m) => m.uid === viewUid)?.displayName;
+  const otherMembers = members.filter((m) => m.uid !== user.uid);
+
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="font-display text-2xl text-white tracking-wider">MATA-MATA</h2>
-          <p className="text-sm text-slate">Monte seu chaveamento até a final.</p>
+          <p className="text-sm text-slate">{viewingOther ? `Chaveamento de ${viewName}` : 'Monte seu chaveamento até a final.'}</p>
         </div>
-        <SaveBadge state={save} locked={locked} />
+        <SaveBadge state={save} locked={locked} viewingOther={viewingOther} />
       </div>
 
       <Countdown locked={locked} />
+
+      {/* Ver chaveamento de outros participantes — liberado após o prazo */}
+      {locked && otherMembers.length > 0 && (
+        <div className="card bg-surface-2 p-3">
+          <label className="text-[11px] font-bold text-slate uppercase tracking-wider mb-1.5 block">Ver chaveamento de</label>
+          <select className="input" value={viewUid} onChange={(e) => setViewUid(e.target.value)}>
+            <option value={user.uid}>Meu chaveamento</option>
+            {otherMembers.map((m) => (
+              <option key={m.uid} value={m.uid}>{m.displayName} (@{m.username})</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div className="card bg-surface-2 p-3 text-[11px] leading-relaxed">
         <p className="text-slate">Informe o placar — <b className="text-white">quem fizer mais gols avança</b>. Deu <b className="text-white">empate</b>? Toque na bolinha de quem passou nos pênaltis. O vencedor sobe no seu chaveamento.</p>
@@ -158,9 +199,9 @@ export default function MataMata() {
                     innerRef={(el) => { matchRefs.current[slot.id] = el; }}
                     slot={slot}
                     roundKey={round.key}
-                    teams={resolveSlotTeams(bracket, slot.id, picks)}
-                    pick={picks[slot.id]}
-                    editable={!locked}
+                    teams={resolveSlotTeams(bracket, slot.id, displayPicks)}
+                    pick={displayPicks[slot.id]}
+                    editable={editable}
                     teamLabel={teamLabel}
                     onScore={setScore}
                     onAdvance={setAdvance}
@@ -175,7 +216,8 @@ export default function MataMata() {
   );
 }
 
-function SaveBadge({ state, locked }) {
+function SaveBadge({ state, locked, viewingOther }) {
+  if (viewingOther) return <span className="chip bg-white/8 text-slate shrink-0">👁 visualizando</span>;
   if (locked) return <span className="chip bg-white/8 text-slate shrink-0">somente leitura</span>;
   if (state === 'saving') return <span className="chip bg-white/8 text-slate shrink-0">salvando…</span>;
   if (state === 'saved') return <span className="chip bg-green/20 text-green-light shrink-0">✓ salvo</span>;

@@ -1,6 +1,13 @@
-import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import { isKnockoutLocked } from '../utils/knockout';
+
+// Lê o chaveamento de outro participante (liberado só após o prazo pelas rules).
+export async function getKnockoutPicks(uid) {
+  if (!uid) return {};
+  const snap = await getDoc(doc(db, 'knockoutPredictions', uid));
+  return snap.exists() ? (snap.data().picks || {}) : {};
+}
 
 // Um documento por usuário: knockoutPredictions/{uid} = { uid, picks, updatedAt }
 // picks = { [slotId]: { homeScore, awayScore, advance: 'home'|'away' } }
