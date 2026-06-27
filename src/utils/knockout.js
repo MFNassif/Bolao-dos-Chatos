@@ -181,24 +181,23 @@ export function officialAdvancer(bracket, roundKey, index) {
 }
 
 /**
- * Pontos do usuário num slot (apenas fases que pontuam):
- *  - errou quem avança → 0
- *  - acertou quem avança → 2
- *  - acertou quem avança + os DOIS times do confronto + placar exato → 4 (cravada)
- * A cravada é sensível aos times: placar igual com adversário errado fica em 2.
+ * Resultado do palpite num slot (apenas fases que pontuam):
+ *  - 'none'    → errou quem avança (ou oficial ainda indefinido)
+ *  - 'winner'  → acertou quem avança
+ *  - 'cravada' → acertou quem avança + os DOIS times do confronto + placar exato
+ * A cravada é sensível aos times: placar igual com adversário errado é 'winner'.
  */
-export function scoreUserSlot(bracket, roundKey, index, picks) {
+export function slotOutcome(bracket, roundKey, index, picks) {
   const round = ROUNDS.find((r) => r.key === roundKey);
-  if (!round || !round.scores) return 0;
+  if (!round || !round.scores) return 'none';
 
   const oAdv = officialAdvancer(bracket, roundKey, index);
-  if (!oAdv) return 0; // resultado oficial ainda não definido
+  if (!oAdv) return 'none'; // resultado oficial ainda não definido
 
   const id = slotId(roundKey, index);
   const uAdv = advancerTeam(bracket, id, picks);
-  if (!uAdv || !sameTeam(uAdv, oAdv)) return 0; // errou o classificado
+  if (!uAdv || !sameTeam(uAdv, oAdv)) return 'none'; // errou o classificado
 
-  // Acertou o classificado → 2. Vira 4 se cravou times + placar.
   const slot = bracket.rounds[ROUNDS.map((r) => r.key).indexOf(roundKey)].slots[index];
   const game = slot.game;
   const oTeams = { home: teamOf(game, 'home'), away: teamOf(game, 'away') };
@@ -209,23 +208,30 @@ export function scoreUserSlot(bracket, roundKey, index, picks) {
   let exact = false;
   if (bothTeams && Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore)
       && Number.isInteger(pick.homeScore) && Number.isInteger(pick.awayScore)) {
-    // Compara gols por time (os dois times batem): gols do user para oTeams.home etc.
     const uHomeGoals = sameTeam(uTeams.home, oTeams.home) ? pick.homeScore : pick.awayScore;
     const uAwayGoals = sameTeam(uTeams.home, oTeams.home) ? pick.awayScore : pick.homeScore;
     exact = uHomeGoals === game.homeScore && uAwayGoals === game.awayScore;
   }
-  return exact ? 4 : 2;
+  return exact ? 'cravada' : 'winner';
 }
 
-// Soma dos pontos do mata-mata de um chaveamento (apenas fases que pontuam).
-export function computeKnockoutPoints(bracket, picks) {
-  if (!bracket) return 0;
-  let total = 0;
+// Conta acertos do chaveamento (independente da pontuação do bolão).
+export function computeKnockoutCounts(bracket, picks) {
+  const counts = { winner: 0, cravada: 0 };
+  if (!bracket) return counts;
   for (const round of ROUNDS) {
     if (!round.scores) continue;
     for (let i = 0; i < round.count; i++) {
-      total += scoreUserSlot(bracket, round.key, i, picks);
+      const o = slotOutcome(bracket, round.key, i, picks);
+      if (o === 'winner') counts.winner += 1;
+      else if (o === 'cravada') counts.cravada += 1;
     }
   }
-  return total;
+  return counts;
+}
+
+// Pontos do mata-mata = o DOBRO da pontuação convencional do bolão:
+// acertar quem avança vale 2× o acerto de resultado; cravar vale 2× a cravada.
+export function knockoutPointsFromCounts(counts, winnerPts, cravadaPts) {
+  return (counts.winner || 0) * winnerPts + (counts.cravada || 0) * cravadaPts;
 }

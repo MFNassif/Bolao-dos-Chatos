@@ -11,7 +11,7 @@ import {
 import { db } from './firebase';
 import { DEFAULT_POOL_SETTINGS } from './settingsService';
 import { scorePrediction, goalError, POINTS_EXACT, POINTS_RESULT } from '../utils/scoring';
-import { buildBracket, computeKnockoutPoints } from '../utils/knockout';
+import { buildBracket, computeKnockoutCounts, knockoutPointsFromCounts } from '../utils/knockout';
 
 export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   const gameRef = doc(db, 'games', gameId);
@@ -181,12 +181,15 @@ export async function recalculateAllPools() {
 
   const gameById = new Map(gamesSnap.docs.map(g => [g.id, g.data()]));
 
-  // Pontos do Mata-Mata (globais por usuario; independem do bolao).
+  // Acertos do Mata-Mata por usuario (winner/cravada). Os PONTOS valem o dobro
+  // da pontuacao convencional de CADA bolao, entao sao aplicados por bolao.
   const bracket = buildBracket(gamesSnap.docs.map(g => ({ id: g.id, ...g.data() })));
-  const koPointsByUid = new Map();
+  const koCountsByUid = new Map();
   for (const k of koSnap.docs) {
-    koPointsByUid.set(k.id, computeKnockoutPoints(bracket, k.data().picks || {}));
+    koCountsByUid.set(k.id, computeKnockoutCounts(bracket, k.data().picks || {}));
   }
+  const koPoints = (uid, exactPts, resultPts) =>
+    knockoutPointsFromCounts(koCountsByUid.get(uid) || { winner: 0, cravada: 0 }, 2 * resultPts, 2 * exactPts);
   const settingsByPool = new Map(
     poolsSnap.docs.map(p => [p.id, { ...DEFAULT_POOL_SETTINGS, ...p.data() }])
   );
@@ -237,7 +240,7 @@ export async function recalculateAllPools() {
     const agg = aggregate(uid, POINTS_EXACT, POINTS_RESULT);
     batch.set(doc(db, 'users', uid), {
       ...agg,
-      knockoutPoints: koPointsByUid.get(uid) || 0,
+      knockoutPoints: koPoints(uid, POINTS_EXACT, POINTS_RESULT),
       predictionsCount: countByUid.get(uid) || 0,
       lastScoreUpdate: serverTimestamp()
     }, { merge: true });
@@ -255,7 +258,7 @@ export async function recalculateAllPools() {
     const agg = aggregate(md.uid, exactPts, resultPts);
     batch.set(member.ref, {
       ...agg,
-      knockoutPoints: koPointsByUid.get(md.uid) || 0,
+      knockoutPoints: koPoints(md.uid, exactPts, resultPts),
       predictionsCount: countByUid.get(md.uid) || 0,
       updatedAt: serverTimestamp()
     }, { merge: true });

@@ -3,6 +3,7 @@ import { useAuth } from '../routes/AuthContext';
 import { useBella } from '../routes/BellaContext';
 import { subscribeGames } from '../services/gameService';
 import { subscribeMyKnockout, saveMyKnockout } from '../services/knockoutService';
+import { subscribePoolSettings } from '../services/settingsService';
 import {
   buildBracket, resolveSlotTeams, isKnockoutLocked, parentChainIds,
   effectiveAdvanceSide, slotId, KNOCKOUT_DEADLINE_MS
@@ -12,8 +13,9 @@ import { formatDate, formatTime, formatDateTime } from '../utils/dates';
 import Loading from '../components/Loading';
 
 export default function MataMata() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { bella } = useBella();
+  const [settings, setSettings] = useState(null);
   const [games, setGames] = useState(null);
   const [savedDoc, setSavedDoc] = useState(null);
   const [picks, setPicks] = useState(null);
@@ -23,6 +25,12 @@ export default function MataMata() {
 
   useEffect(() => subscribeGames(setGames), []);
   useEffect(() => subscribeMyKnockout(user.uid, setSavedDoc), [user.uid]);
+  useEffect(() => {
+    if (!profile?.activePoolId) { setSettings(null); return; }
+    return subscribePoolSettings(profile.activePoolId, setSettings);
+  }, [profile?.activePoolId]);
+  const winnerPts = 2 * (settings?.correctResultPoints ?? 1);
+  const cravadaPts = 2 * (settings?.exactScorePoints ?? 5);
   useEffect(() => { if (savedDoc && picks === null) setPicks(savedDoc.picks || {}); }, [savedDoc, picks]);
 
   const bracket = useMemo(() => (games ? buildBracket(games) : null), [games]);
@@ -127,7 +135,7 @@ export default function MataMata() {
 
       <div className="card bg-surface-2 p-3 text-[11px] leading-relaxed">
         <p className="text-slate">Informe o placar — <b className="text-white">quem fizer mais gols avança</b>. Deu <b className="text-white">empate</b>? Toque na bolinha de quem passou nos pênaltis. O vencedor sobe no seu chaveamento.</p>
-        <p className="text-slate mt-1"><b className="text-white">16-avos não pontuam</b>. Das oitavas: <b className="text-green-light">2 pts</b> acertando quem avança, <b className="text-yellow-400">4 pts</b> cravando placar + os dois times do confronto.</p>
+        <p className="text-slate mt-1"><b className="text-white">16-avos não pontuam</b>. Das oitavas (vale o <b className="text-white">dobro</b> da pontuação do bolão): <b className="text-green-light">{winnerPts} pts</b> acertando quem avança, <b className="text-yellow-400">{cravadaPts} pts</b> cravando placar + os dois times do confronto.</p>
         <p className="text-slate/70 mt-1">Arraste para o lado para ver todas as fases →</p>
       </div>
 
