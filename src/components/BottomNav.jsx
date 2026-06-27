@@ -3,6 +3,7 @@ import { useAuth } from '../routes/AuthContext';
 
 const items = [
   { to: '/', label: 'Jogos', end: true, icon: BallIcon },
+  { to: '/mata-mata', label: 'Mata-Mata', icon: BracketIcon },
   { to: '/palpites', label: 'Palpites', icon: TicketIcon },
   { to: '/ranking', label: 'Ranking', icon: TrophyIcon }
 ];
@@ -42,6 +43,9 @@ export default function BottomNav() {
 
 function BallIcon(p) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="12" r="9"/><path d="M12 3l3 5-1.5 4.5L9 13l-2-4z"/><path d="M21 12l-4 .5-3 3 1 4"/><path d="M3 12l4 1 2 4-2 3"/></svg>;
+}
+function BracketIcon(p) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M4 5h4v6h4M4 19h4v-6"/><path d="M16 8h4M16 8v8M16 16h4"/><path d="M12 12h4"/></svg>;
 }
 function TicketIcon(p) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...p}><path d="M3 9a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M13 7v10" strokeDasharray="2 2"/></svg>;

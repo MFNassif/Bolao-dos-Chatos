@@ -63,6 +63,7 @@ export default function Layout() {
 
   const desktopLinks = [
     { to: '/', label: 'Jogos', end: true },
+    { to: '/mata-mata', label: 'Mata-Mata' },
     { to: '/palpites', label: 'Palpites' },
     { to: '/ranking', label: 'Ranking' }
   ];

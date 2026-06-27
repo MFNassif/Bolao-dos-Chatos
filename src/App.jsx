@@ -13,6 +13,7 @@ import Loading from './components/Loading';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Games from './pages/Games';
+import MataMata from './pages/MataMata';
 import Predictions from './pages/Predictions';
 import Ranking from './pages/Ranking';
 import Admin from './pages/Admin';
@@ -69,6 +70,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<Layout />}>
               <Route path="/"          element={<Games />} />
+              <Route path="/mata-mata" element={<MataMata />} />
               <Route path="/palpites"  element={<Predictions />} />
               <Route path="/ranking"   element={<Ranking />} />
               <Route element={<AdminRoute />}>

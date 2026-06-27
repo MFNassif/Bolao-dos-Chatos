@@ -348,5 +348,24 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow write: if isAdmin();
     }
+
+    // ===== Mata-Mata (chaveamento) =====
+    // Prazo de edicao: 28/06/2026 15:00 America/Sao_Paulo = 18:00 UTC.
+    function knockoutOpen() {
+      return request.time < timestamp.date(2026, 6, 28) + duration.value(18, 'h');
+    }
+
+    match /knockoutPredictions/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+
+      allow create, update: if isSelf(uid) &&
+        knockoutOpen() &&
+        request.resource.data.keys().hasOnly(['uid', 'picks', 'updatedAt']) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.picks is map &&
+        request.resource.data.updatedAt == request.time;
+
+      allow delete: if isAdmin();
+    }
   }
 }
