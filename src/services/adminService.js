@@ -63,6 +63,38 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   }).commit();
 }
 
+/**
+ * Define manualmente os times de um confronto (ex.: resolver placeholders de
+ * 3º lugar no mata-mata). home/away: undefined = nao mexe; null = "A definir";
+ * { code, name, flag } = define o time. Nao toca em placar/status.
+ */
+export async function setGameTeams({ gameId, home, away }) {
+  const gameRef = doc(db, 'games', gameId);
+  const gameSnap = await getDoc(gameRef);
+  if (!gameSnap.exists()) throw new Error('Jogo nao encontrado.');
+
+  const payload = { lastUpdatedAt: serverTimestamp() };
+  if (home !== undefined) {
+    payload.homeTeam = home?.name || '';
+    payload.homeTeamCode = home?.code || '';
+    payload.homeTeamFlag = home?.flag || '';
+  }
+  if (away !== undefined) {
+    payload.awayTeam = away?.name || '';
+    payload.awayTeamCode = away?.code || '';
+    payload.awayTeamFlag = away?.flag || '';
+  }
+  await writeBatch(db).set(gameRef, payload, { merge: true }).commit();
+
+  const logRef = doc(collection(db, 'syncLogs'));
+  await writeBatch(db).set(logRef, {
+    type: 'setGameTeams',
+    success: true,
+    message: `Confronto ajustado em ${gameId}: ${payload.homeTeam ?? '(mantido)'} x ${payload.awayTeam ?? '(mantido)'}`,
+    createdAt: serverTimestamp()
+  }).commit();
+}
+
 export async function recalculateGameScores(gameId, { recalculateUsers = true } = {}) {
   const gameSnap = await getDoc(doc(db, 'games', gameId));
   if (!gameSnap.exists()) throw new Error('Jogo nao encontrado.');

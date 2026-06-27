@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, limit, orderBy, query } from 'firebase/firestore';
 import { db } from '../services/firebase';
 import { subscribeGames } from '../services/gameService';
-import { setGameResult, recalculatePoolScores, recalculateAllPools, setUserRole, removeUserFromPool } from '../services/adminService';
+import { setGameResult, setGameTeams, recalculatePoolScores, recalculateAllPools, setUserRole, removeUserFromPool } from '../services/adminService';
 import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, savePoolSettings, subscribeAppSettings, saveAppSettings } from '../services/settingsService';
 import { createPool, getPoolMembers, getPoolsForAdmin, joinPoolWithPassword } from '../services/poolService';
 import { useAuth } from '../routes/AuthContext';
@@ -342,6 +342,19 @@ function GamesAdmin({ busy, onRun }) {
     // (isso desmontaria a linha em ediçao e fecharia o editor de placar).
     setGames(prev => (prev && prev.length && (!next || !next.length)) ? prev : next);
   }), []);
+
+  // Lista de seleções (códigos reais com bandeira) para escolher confrontos.
+  const teams = useMemo(() => {
+    const map = new Map();
+    for (const g of games || []) {
+      for (const side of ['home', 'away']) {
+        const code = g[`${side}TeamCode`];
+        if (code && !map.has(code)) map.set(code, { code, name: g[`${side}Team`] || code, flag: g[`${side}TeamFlag`] || '' });
+      }
+    }
+    return [...map.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [games]);
+
   if (games === null) return <Loading />;
   if (!games.length) return (
     <div className="card bg-surface-2 p-8 text-center text-slate text-sm">
@@ -350,7 +363,7 @@ function GamesAdmin({ busy, onRun }) {
   );
   return (
     <div className="space-y-3">
-      {games.map(g => <GameRow key={g.id} game={g} busy={busy} onRun={onRun} />)}
+      {games.map(g => <GameRow key={g.id} game={g} busy={busy} onRun={onRun} teams={teams} />)}
     </div>
   );
 }
@@ -361,11 +374,31 @@ const STATUS_LABELS = {
   finished: '✅ Encerrado'
 };
 
-function GameRow({ game, busy, onRun }) {
+function GameRow({ game, busy, onRun, teams = [] }) {
   const [editing, setEditing] = useState(false);
   const [home, setHome] = useState('');
   const [away, setAway] = useState('');
   const [status, setStatus] = useState('scheduled');
+  const [editingTeams, setEditingTeams] = useState(false);
+  const [homeSel, setHomeSel] = useState('__keep__');
+  const [awaySel, setAwaySel] = useState('__keep__');
+  const isKnockout = !game.group;
+
+  function openTeams() {
+    setHomeSel('__keep__');
+    setAwaySel('__keep__');
+    setEditingTeams(true);
+  }
+
+  async function saveTeams() {
+    const resolve = (sel) => sel === '__keep__' ? undefined
+      : (sel === '__clear__' ? null : (teams.find(t => t.code === sel) || null));
+    await onRun('Editar confronto', async () => {
+      await setGameTeams({ gameId: game.id, home: resolve(homeSel), away: resolve(awaySel) });
+      return { message: 'Confronto atualizado.' };
+    });
+    setEditingTeams(false);
+  }
 
   // Abre o editor capturando o estado atual do jogo UMA vez. Enquanto edita,
   // os campos sao estado local puro: snapshots em background nao os tocam
@@ -431,9 +464,26 @@ function GameRow({ game, busy, onRun }) {
         <p className="font-display text-2xl text-white mb-2">{game.homeScore} <span className="text-slate">×</span> {game.awayScore}</p>
       )}
 
-      {!editing ? (
+      {editingTeams ? (
+        <div className="space-y-2">
+          <p className="text-[11px] text-slate font-bold uppercase tracking-wider">Editar confronto</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <TeamSelect label={`Mandante (atual: ${game.homeTeam || 'A definir'})`} value={homeSel} onChange={setHomeSel} teams={teams} />
+            <span className="text-slate font-display">×</span>
+            <TeamSelect label={`Visitante (atual: ${game.awayTeam || 'A definir'})`} value={awaySel} onChange={setAwaySel} teams={teams} />
+          </div>
+          <p className="text-[11px] text-slate">"Manter" não altera o lado. Escolha uma seleção para definir, ou "A definir" para limpar. Não mexe no placar.</p>
+          <div className="flex gap-2">
+            <button className="btn-primary text-xs" disabled={busy} onClick={saveTeams}>Salvar confronto</button>
+            <button className="btn-ghost text-xs" disabled={busy} onClick={() => setEditingTeams(false)}>Cancelar</button>
+          </div>
+        </div>
+      ) : !editing ? (
         <div className="flex gap-2 flex-wrap">
           <button className="btn-primary text-xs" onClick={openEditor} disabled={busy}>Definir placar</button>
+          {isKnockout && (
+            <button className="btn-ghost text-xs text-blue-300" disabled={busy} onClick={openTeams}>Editar confronto</button>
+          )}
           {game.status !== 'live' && (
             <button className="btn-ghost text-xs text-red-400" disabled={busy}
               onClick={() => quickStatus('live', 'Jogo marcado como AO VIVO.')}>Iniciar (ao vivo)</button>
@@ -475,6 +525,16 @@ function GameRow({ game, busy, onRun }) {
         </div>
       )}
     </article>
+  );
+}
+
+function TeamSelect({ label, value, onChange, teams }) {
+  return (
+    <select className="input !py-2 max-w-[150px]" value={value} onChange={(e) => onChange(e.target.value)} title={label} aria-label={label}>
+      <option value="__keep__">Manter atual</option>
+      <option value="__clear__">— A definir —</option>
+      {teams.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
+    </select>
   );
 }
 
