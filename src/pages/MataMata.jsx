@@ -4,7 +4,8 @@ import { useBella } from '../routes/BellaContext';
 import { subscribeGames } from '../services/gameService';
 import { subscribeMyKnockout, saveMyKnockout } from '../services/knockoutService';
 import {
-  buildBracket, resolveSlotTeams, isKnockoutLocked, parentChainIds, KNOCKOUT_DEADLINE_MS
+  buildBracket, resolveSlotTeams, isKnockoutLocked, parentChainIds,
+  effectiveAdvanceSide, KNOCKOUT_DEADLINE_MS
 } from '../utils/knockout';
 import { getFullName } from '../utils/teamNames';
 import { formatDate, formatTime, formatDateTime } from '../utils/dates';
@@ -16,7 +17,7 @@ export default function MataMata() {
   const [games, setGames] = useState(null);
   const [savedDoc, setSavedDoc] = useState(null);
   const [picks, setPicks] = useState(null);
-  const [save, setSave] = useState('idle'); // idle | saving | saved | error
+  const [save, setSave] = useState('idle');
   const locked = isKnockoutLocked();
   const firstLoad = useRef(true);
 
@@ -41,10 +42,23 @@ export default function MataMata() {
     if (!t) return null;
     return bella ? getFullName(t.code, t.name) : (t.code || t.name);
   }
-  function setScore(slotId, side, raw) {
+
+  function setScore(roundKey, index, slotId, side, raw) {
     const v = raw.replace(/\D+/g, '').slice(0, 2);
-    setPicks((p) => ({ ...p, [slotId]: { ...(p[slotId] || {}), [side === 'home' ? 'homeScore' : 'awayScore']: v === '' ? undefined : Number(v) } }));
+    setPicks((p) => {
+      const cur = p[slotId] || {};
+      const before = effectiveAdvanceSide(cur);
+      const updated = { ...cur, [side === 'home' ? 'homeScore' : 'awayScore']: v === '' ? undefined : Number(v) };
+      const next = { ...p, [slotId]: updated };
+      // Se mudou quem avança, limpa as fases seguintes que dependem deste jogo.
+      if (effectiveAdvanceSide(updated) !== before) {
+        for (const dep of parentChainIds(roundKey, index)) delete next[dep];
+      }
+      return next;
+    });
   }
+
+  // Só no empate o usuário escolhe quem passa (pênaltis).
   function setAdvance(roundKey, index, slotId, side) {
     setPicks((p) => {
       const next = { ...p, [slotId]: { ...(p[slotId] || {}), advance: side } };
@@ -65,15 +79,14 @@ export default function MataMata() {
         <SaveBadge state={save} locked={locked} />
       </div>
 
-      <div className={`card p-3 text-[11px] leading-relaxed ${locked ? 'bg-red-950/30 border-red-800/30' : 'bg-surface-2'}`}>
-        {locked
-          ? <p className="text-red-300 font-semibold">🔒 Palpites encerrados em {formatDateTime(KNOCKOUT_DEADLINE_MS)}. Agora é só visualização.</p>
-          : <p className="text-slate">Prazo: <span className="text-white font-semibold">{formatDateTime(KNOCKOUT_DEADLINE_MS)}</span> (Brasília). Escolha o placar e <b className="text-white">quem avança</b> (pode dar empate e decidir nos pênaltis). O vencedor sobe no seu chaveamento.</p>}
+      <Countdown locked={locked} />
+
+      <div className="card bg-surface-2 p-3 text-[11px] leading-relaxed">
+        <p className="text-slate">Informe o placar — <b className="text-white">quem fizer mais gols avança</b>. Deu <b className="text-white">empate</b>? Toque na bolinha de quem passou nos pênaltis. O vencedor sobe no seu chaveamento.</p>
         <p className="text-slate mt-1"><b className="text-white">16-avos não pontuam</b>. Das oitavas: <b className="text-green-light">2 pts</b> acertando quem avança, <b className="text-yellow-400">4 pts</b> cravando placar + os dois times do confronto.</p>
         <p className="text-slate/70 mt-1">Arraste para o lado para ver todas as fases →</p>
       </div>
 
-      {/* Chaveamento: colunas por fase, com rolagem horizontal */}
       <div className="overflow-x-auto -mx-4 px-4 pb-4">
         <div className="kobracket">
           {bracket.rounds.map((round) => (
@@ -86,7 +99,7 @@ export default function MataMata() {
                   <MatchBox
                     key={slot.id}
                     slot={slot}
-                    round={round}
+                    roundKey={round.key}
                     teams={resolveSlotTeams(bracket, slot.id, picks)}
                     pick={picks[slot.id]}
                     editable={!locked}
@@ -112,37 +125,80 @@ function SaveBadge({ state, locked }) {
   return null;
 }
 
-function MatchBox({ slot, round, teams, pick, editable, teamLabel, onScore, onAdvance }) {
-  const ready = !!(teams.home && teams.away);
-  const canEdit = editable && ready;
-  const dt = slot.game?.startTime;
+function Countdown({ locked }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (locked) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [locked]);
 
-  function Row({ side }) {
-    const t = teams[side];
-    const score = side === 'home' ? pick?.homeScore : pick?.awayScore;
-    const isAdv = pick?.advance === side;
+  const ms = KNOCKOUT_DEADLINE_MS - now;
+  if (locked || ms <= 0) {
     return (
-      <div className={`flex items-center gap-1 px-1 py-1 rounded-md transition ${isAdv ? 'bg-green/15 ring-1 ring-green/30' : ''}`}>
-        <button
-          type="button" disabled={!canEdit}
-          onClick={() => onAdvance(round.key, slot.index, slot.id, side)}
-          title={canEdit ? 'Quem avança' : ''}
-          className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center text-[8px] ${isAdv ? 'border-green bg-green text-white' : 'border-white/25 text-transparent'} ${canEdit ? 'hover:border-green' : ''}`}
-        >✓</button>
-        <span className="w-5 h-5 rounded bg-white/8 border border-white/10 overflow-hidden flex items-center justify-center shrink-0">
-          {t?.flag ? <img src={t.flag} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[7px] text-slate">{t?.code?.slice(0, 3) || '?'}</span>}
-        </span>
-        <span className={`flex-1 text-[11px] font-semibold truncate ${t ? 'text-white' : 'text-slate italic'}`}>{teamLabel(t) || 'A definir'}</span>
-        <input
-          inputMode="numeric" pattern="[0-9]*" disabled={!canEdit}
-          value={Number.isInteger(score) ? score : ''}
-          onChange={(e) => onScore(slot.id, side, e.target.value)}
-          className="w-6 h-6 text-center text-sm font-display rounded bg-white/8 border border-white/15 text-white outline-none focus:border-green disabled:opacity-40"
-          aria-label="Placar"
-        />
+      <div className="card bg-red-950/30 border-red-800/30 p-3 text-center">
+        <p className="text-red-300 font-semibold text-sm">🔒 Palpites encerrados</p>
+        <p className="text-[11px] text-slate mt-0.5">Fechou em {formatDateTime(KNOCKOUT_DEADLINE_MS)} · agora é só visualização.</p>
       </div>
     );
   }
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  const cells = [{ v: d, l: 'dias' }, { v: h, l: 'horas' }, { v: m, l: 'min' }, { v: sec, l: 'seg' }];
+  return (
+    <div className="card bg-surface-2 p-3">
+      <p className="text-[11px] text-slate uppercase tracking-wider font-bold text-center mb-2">⏳ Fecha em</p>
+      <div className="grid grid-cols-4 gap-2">
+        {cells.map((c) => (
+          <div key={c.l} className="bg-white/6 rounded-xl py-2 text-center">
+            <p className="font-display text-2xl text-green-light tabular-nums leading-none">{String(c.v).padStart(2, '0')}</p>
+            <p className="text-[9px] text-slate uppercase tracking-wider mt-1">{c.l}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-slate text-center mt-2">Prazo: {formatDateTime(KNOCKOUT_DEADLINE_MS)} (Brasília)</p>
+    </div>
+  );
+}
+
+function TeamRow({ side, team, score, isAdv, isDraw, canEditScore, canPickAdvance, teamLabel, onScore, onAdvance }) {
+  return (
+    <div className={`flex items-center gap-1 px-1 py-1 rounded-md transition ${isAdv ? 'bg-green/15 ring-1 ring-green/30' : ''}`}>
+      <button
+        type="button"
+        disabled={!canPickAdvance}
+        onClick={canPickAdvance ? onAdvance : undefined}
+        title={canPickAdvance ? 'Quem passou nos pênaltis' : (isAdv ? 'Avança (mais gols)' : '')}
+        className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center text-[8px] ${
+          isAdv ? 'border-green bg-green text-white' : 'border-white/25 text-transparent'
+        } ${canPickAdvance ? 'hover:border-green cursor-pointer' : 'cursor-default'}`}
+      >✓</button>
+      <span className="w-5 h-5 rounded bg-white/8 border border-white/10 overflow-hidden flex items-center justify-center shrink-0">
+        {team?.flag ? <img src={team.flag} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[7px] text-slate">{team?.code?.slice(0, 3) || '?'}</span>}
+      </span>
+      <span className={`flex-1 text-[11px] font-semibold truncate ${team ? 'text-white' : 'text-slate italic'}`}>{teamLabel(team) || 'A definir'}</span>
+      <input
+        inputMode="numeric" pattern="[0-9]*" disabled={!canEditScore}
+        value={Number.isInteger(score) ? score : ''}
+        onChange={(e) => onScore(side, e.target.value)}
+        className="w-6 h-6 text-center text-sm font-display rounded bg-white/8 border border-white/15 text-white outline-none focus:border-green disabled:opacity-40"
+        aria-label="Placar"
+      />
+    </div>
+  );
+}
+
+function MatchBox({ slot, roundKey, teams, pick, editable, teamLabel, onScore, onAdvance }) {
+  const ready = !!(teams.home && teams.away);
+  const canEditScore = editable && ready;
+  const hasBoth = Number.isInteger(pick?.homeScore) && Number.isInteger(pick?.awayScore);
+  const isDraw = hasBoth && pick.homeScore === pick.awayScore;
+  const advSide = effectiveAdvanceSide(pick);
+  const canPickAdvance = editable && ready && isDraw;
+  const dt = slot.game?.startTime;
 
   return (
     <article className="komatch card bg-surface-2 p-1.5">
@@ -150,8 +206,24 @@ function MatchBox({ slot, round, teams, pick, editable, teamLabel, onScore, onAd
         <span className="text-[9px] text-slate uppercase tracking-wide font-bold">Jogo {slot.index + 1}</span>
         {dt && <span className="text-[9px] text-slate">{formatDate(dt)} {formatTime(dt)}</span>}
       </div>
-      <Row side="home" />
-      <Row side="away" />
+      {['home', 'away'].map((side) => (
+        <TeamRow
+          key={side}
+          side={side}
+          team={teams[side]}
+          score={side === 'home' ? pick?.homeScore : pick?.awayScore}
+          isAdv={advSide === side}
+          isDraw={isDraw}
+          canEditScore={canEditScore}
+          canPickAdvance={canPickAdvance}
+          teamLabel={teamLabel}
+          onScore={(s, raw) => onScore(roundKey, slot.index, slot.id, s, raw)}
+          onAdvance={() => onAdvance(roundKey, slot.index, slot.id, side)}
+        />
+      ))}
+      {canPickAdvance && !advSide && (
+        <p className="text-[9px] text-yellow-400 px-1 mt-0.5">Empate — toque em quem passou ✓</p>
+      )}
     </article>
   );
 }

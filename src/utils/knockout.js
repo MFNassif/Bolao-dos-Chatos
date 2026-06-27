@@ -108,12 +108,25 @@ export function resolveSlotTeams(bracket, slotId_, picks) {
   };
 }
 
-// Time que o usuário escolheu para avançar de um slot (ou null se não escolheu).
+// Lado que avança de um slot a partir do palpite:
+//  - placar decisivo → quem fez mais gols (automático);
+//  - empate → escolha manual (pênaltis), via pick.advance;
+//  - placar incompleto → indefinido (null).
+export function effectiveAdvanceSide(pick) {
+  const h = pick?.homeScore;
+  const a = pick?.awayScore;
+  if (!Number.isInteger(h) || !Number.isInteger(a)) return null;
+  if (h > a) return 'home';
+  if (a > h) return 'away';
+  return (pick?.advance === 'home' || pick?.advance === 'away') ? pick.advance : null;
+}
+
+// Time que avança de um slot (ou null se ainda indefinido).
 export function advancerTeam(bracket, slotId_, picks) {
   const teams = resolveSlotTeams(bracket, slotId_, picks);
-  const pick = picks?.[slotId_];
-  if (!pick || !pick.advance) return null;
-  return pick.advance === 'home' ? teams.home : (pick.advance === 'away' ? teams.away : null);
+  const side = effectiveAdvanceSide(picks?.[slotId_]);
+  if (!side) return null;
+  return side === 'home' ? teams.home : teams.away;
 }
 
 // Slot está pronto para palpitar? (os dois times definidos)
