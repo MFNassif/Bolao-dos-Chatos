@@ -5,6 +5,7 @@ import { useBella } from '../routes/BellaContext';
 import { logout } from '../services/authService';
 import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, calcPrizes } from '../services/settingsService';
 import { getPoolMemberCount, subscribePoolMember } from '../services/poolService';
+import { combinedPoints } from '../services/rankingService';
 import BottomNav from './BottomNav';
 import PoolGate from './PoolGate';
 import PoolSwitcher from './PoolSwitcher';
@@ -52,7 +53,7 @@ export default function Layout() {
 
   const activeSettings = settings || DEFAULT_POOL_SETTINGS;
   const prizes = settings ? calcPrizes(activeSettings, participantCount) : null;
-  const myPoints = myMember?.totalPoints ?? profile?.totalPoints ?? 0;
+  const myPoints = combinedPoints(myMember || profile || {});
   const scoring = [
     { key: 'exact', pts: activeSettings.exactScorePoints, label: 'Placar exato', color: 'text-yellow-400', bg: 'bg-yellow-500/15 border border-yellow-500/30' },
     { key: 'result', pts: activeSettings.correctResultPoints, label: 'Acertou o vencedor ou empate', color: 'text-green-light', bg: 'bg-green/15 border border-green/30' },

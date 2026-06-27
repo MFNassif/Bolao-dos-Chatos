@@ -142,3 +142,77 @@ export function sameTeam(a, b) {
   if (a.code && b.code) return a.code === b.code;
   return (a.name || '') === (b.name || '');
 }
+
+function samePair(p, q) {
+  if (!p.home || !p.away || !q.home || !q.away) return false;
+  return (sameTeam(p.home, q.home) && sameTeam(p.away, q.away)) ||
+    (sameTeam(p.home, q.away) && sameTeam(p.away, q.home));
+}
+
+// Quem AVANÇOU oficialmente de um slot (resolve pênaltis):
+//  - vitória no tempo normal: vem do winner do jogo;
+//  - empate (pênaltis): deriva pelo time que aparece na fase seguinte oficial.
+export function officialAdvancer(bracket, roundKey, index) {
+  const order = ROUNDS.map((r) => r.key);
+  const ri = order.indexOf(roundKey);
+  const slot = bracket.rounds[ri]?.slots[index];
+  const game = slot?.game;
+  if (!game) return null;
+  if (game.winner === 'home') return teamOf(game, 'home');
+  if (game.winner === 'away') return teamOf(game, 'away');
+  // Empate → o classificado é quem aparece no jogo oficial da proxima fase.
+  if (ri >= order.length - 1) return null; // final: sem fase seguinte para derivar
+  const parent = bracket.rounds[ri + 1]?.slots[Math.floor(index / 2)];
+  if (!parent?.game) return null;
+  return teamOf(parent.game, index % 2 === 0 ? 'home' : 'away');
+}
+
+/**
+ * Pontos do usuário num slot (apenas fases que pontuam):
+ *  - errou quem avança → 0
+ *  - acertou quem avança → 2
+ *  - acertou quem avança + os DOIS times do confronto + placar exato → 4 (cravada)
+ * A cravada é sensível aos times: placar igual com adversário errado fica em 2.
+ */
+export function scoreUserSlot(bracket, roundKey, index, picks) {
+  const round = ROUNDS.find((r) => r.key === roundKey);
+  if (!round || !round.scores) return 0;
+
+  const oAdv = officialAdvancer(bracket, roundKey, index);
+  if (!oAdv) return 0; // resultado oficial ainda não definido
+
+  const id = slotId(roundKey, index);
+  const uAdv = advancerTeam(bracket, id, picks);
+  if (!uAdv || !sameTeam(uAdv, oAdv)) return 0; // errou o classificado
+
+  // Acertou o classificado → 2. Vira 4 se cravou times + placar.
+  const slot = bracket.rounds[ROUNDS.map((r) => r.key).indexOf(roundKey)].slots[index];
+  const game = slot.game;
+  const oTeams = { home: teamOf(game, 'home'), away: teamOf(game, 'away') };
+  const uTeams = resolveSlotTeams(bracket, id, picks);
+  const pick = picks?.[id] || {};
+
+  const bothTeams = samePair(uTeams, oTeams);
+  let exact = false;
+  if (bothTeams && Number.isInteger(game.homeScore) && Number.isInteger(game.awayScore)
+      && Number.isInteger(pick.homeScore) && Number.isInteger(pick.awayScore)) {
+    // Compara gols por time (os dois times batem): gols do user para oTeams.home etc.
+    const uHomeGoals = sameTeam(uTeams.home, oTeams.home) ? pick.homeScore : pick.awayScore;
+    const uAwayGoals = sameTeam(uTeams.home, oTeams.home) ? pick.awayScore : pick.homeScore;
+    exact = uHomeGoals === game.homeScore && uAwayGoals === game.awayScore;
+  }
+  return exact ? 4 : 2;
+}
+
+// Soma dos pontos do mata-mata de um chaveamento (apenas fases que pontuam).
+export function computeKnockoutPoints(bracket, picks) {
+  if (!bracket) return 0;
+  let total = 0;
+  for (const round of ROUNDS) {
+    if (!round.scores) continue;
+    for (let i = 0; i < round.count; i++) {
+      total += scoreUserSlot(bracket, round.key, i, picks);
+    }
+  }
+  return total;
+}

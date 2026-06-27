@@ -8,9 +8,14 @@ function goalErrorOf(row) {
   return Number.isFinite(v) ? v : Infinity;
 }
 
+// Total que vale no ranking: pontos dos palpites comuns + pontos do Mata-Mata.
+export function combinedPoints(row) {
+  return (Number(row?.totalPoints) || 0) + (Number(row?.knockoutPoints) || 0);
+}
+
 /**
  * Ordem oficial do ranking (vale para premiacao). Criterios de desempate:
- *  1) mais pontos
+ *  1) mais pontos (comuns + mata-mata)
  *  2) mais cravadas (placar exato)
  *  3) menor erro de gols (palpite mais perto do placar real)
  *  4) mais palpites feitos (participacao)
@@ -18,7 +23,7 @@ function goalErrorOf(row) {
  */
 export function compareRanking(a, b) {
   return (
-    (b.totalPoints || 0) - (a.totalPoints || 0) ||
+    combinedPoints(b) - combinedPoints(a) ||
     (b.exactScores || 0) - (a.exactScores || 0) ||
     goalErrorOf(a) - goalErrorOf(b) ||
     (b.predictionsCount || 0) - (a.predictionsCount || 0)

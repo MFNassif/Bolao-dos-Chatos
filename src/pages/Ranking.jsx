@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../routes/AuthContext';
-import { subscribeRanking, compareRanking } from '../services/rankingService';
+import { subscribeRanking, compareRanking, combinedPoints } from '../services/rankingService';
 import { subscribeLiveGames } from '../services/gameService';
 import { subscribePoolSettings, calcPrizes } from '../services/settingsService';
 import RankingTable from '../components/RankingTable';
@@ -127,7 +127,7 @@ export default function Ranking() {
             return (
               <div key={u.uid} className="flex flex-col items-center">
                 <div className="card bg-surface-2 p-2.5 w-full text-center mb-1.5">
-                  <p className={`font-display text-xl ${txtColors[idx]}`}>{u.totalPoints || 0}</p>
+                  <p className={`font-display text-xl ${txtColors[idx]}`}>{combinedPoints(u)}</p>
                   <p className="text-[10px] text-slate">pts</p>
                   <p className="font-bold text-xs text-white truncate mt-0.5">{u.displayName}</p>
                   {prizes && <p className={`text-[10px] font-bold mt-0.5 ${txtColors[idx]}`}>{settings.currency} {[prizes.first, prizes.second, prizes.third][idx]}</p>}
@@ -151,11 +151,14 @@ export default function Ranking() {
               <p className="text-sm text-slate">{profile.displayName}</p>
             </div>
             <div className="text-right space-y-1">
-              <p className="font-display text-3xl text-green-light">{myRow?.totalPoints || 0} <span className="text-base text-slate">pts</span></p>
+              <p className="font-display text-3xl text-green-light">{combinedPoints(myRow)} <span className="text-base text-slate">pts</span></p>
               <div className="flex gap-3 justify-end text-xs">
                 <span className="text-yellow-400 font-bold">🎯 {myRow?.exactScores || 0} cravadas</span>
                 <span className="text-white/60">✓ {myRow?.correctResults || 0} acertos</span>
               </div>
+              {(myRow?.knockoutPoints || 0) > 0 && (
+                <p className="text-[11px] text-slate">{myRow?.totalPoints || 0} comuns + <span className="text-green-light font-semibold">{myRow.knockoutPoints} mata-mata 🏆</span></p>
+              )}
             </div>
           </div>
         </div>

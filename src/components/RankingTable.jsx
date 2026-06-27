@@ -1,4 +1,4 @@
-import { compareRanking } from '../services/rankingService';
+import { compareRanking, combinedPoints } from '../services/rankingService';
 
 export default function RankingTable({ rows, currentUid, sortBy = 'points' }) {
   const sorted = [...rows].sort((a, b) => {
@@ -41,7 +41,12 @@ export default function RankingTable({ rows, currentUid, sortBy = 'points' }) {
               </div>
               <p className="text-center text-sm font-semibold text-white/70">{u.correctResults || 0}</p>
               <p className="text-center text-sm font-bold text-yellow-400">{u.exactScores || 0}</p>
-              <p className="text-right font-display text-xl text-green-light">{u.totalPoints || 0}</p>
+              <div className="text-right">
+                <p className="font-display text-xl text-green-light leading-none">{combinedPoints(u)}</p>
+                {(u.knockoutPoints || 0) > 0 && (
+                  <p className="text-[9px] text-slate leading-none mt-0.5">{u.totalPoints || 0}+{u.knockoutPoints}🏆</p>
+                )}
+              </div>
             </li>
           );
         })}
