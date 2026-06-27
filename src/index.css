@@ -80,13 +80,24 @@
 
 /* ── Chaveamento Mata-Mata ─────────────────────────────────── */
 .kobracket {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: 26px;
   width: max-content;
   min-width: 100%;
 }
+/* SVG dos conectores: fica atrás dos cards (que têm fundo opaco) */
+.kolines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  pointer-events: none;
+}
 .koround {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   width: 178px;
@@ -116,23 +127,4 @@
 }
 .komatch {
   position: relative;
-}
-/* conectores: tracinho saindo à direita e entrando à esquerda */
-.koround:not(:last-child) .komatch::after {
-  content: '';
-  position: absolute;
-  right: -13px;
-  top: 50%;
-  width: 13px;
-  height: 2px;
-  background: rgba(255,255,255,0.12);
-}
-.koround:not(:first-child) .komatch::before {
-  content: '';
-  position: absolute;
-  left: -13px;
-  top: 50%;
-  width: 13px;
-  height: 2px;
-  background: rgba(255,255,255,0.12);
 }

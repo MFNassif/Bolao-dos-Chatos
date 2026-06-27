@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../routes/AuthContext';
 import { useBella } from '../routes/BellaContext';
 import { subscribeGames } from '../services/gameService';
 import { subscribeMyKnockout, saveMyKnockout } from '../services/knockoutService';
 import {
   buildBracket, resolveSlotTeams, isKnockoutLocked, parentChainIds,
-  effectiveAdvanceSide, KNOCKOUT_DEADLINE_MS
+  effectiveAdvanceSide, slotId, KNOCKOUT_DEADLINE_MS
 } from '../utils/knockout';
 import { getFullName } from '../utils/teamNames';
 import { formatDate, formatTime, formatDateTime } from '../utils/dates';
@@ -26,6 +26,50 @@ export default function MataMata() {
   useEffect(() => { if (savedDoc && picks === null) setPicks(savedDoc.picks || {}); }, [savedDoc, picks]);
 
   const bracket = useMemo(() => (games ? buildBracket(games) : null), [games]);
+
+  // Conectores do chaveamento desenhados em SVG, medindo a posição real de
+  // cada card (o espaçamento é dinâmico, então linhas em CSS fixo não alinham).
+  const wrapRef = useRef(null);
+  const matchRefs = useRef({});
+  const [lines, setLines] = useState([]);
+  const [svgDim, setSvgDim] = useState({ w: 0, h: 0 });
+
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap || !bracket) return;
+    function compute() {
+      const cont = wrap.getBoundingClientRect();
+      const rectOf = (id) => {
+        const el = matchRefs.current[id];
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { left: r.left - cont.left, right: r.right - cont.left, cy: (r.top + r.bottom) / 2 - cont.top };
+      };
+      const segs = [];
+      for (let r = 0; r < bracket.rounds.length - 1; r++) {
+        const cur = bracket.rounds[r];
+        const next = bracket.rounds[r + 1];
+        for (let i = 0; i < next.slots.length; i++) {
+          const f0 = rectOf(slotId(cur.key, 2 * i));
+          const f1 = rectOf(slotId(cur.key, 2 * i + 1));
+          const tgt = rectOf(next.slots[i].id);
+          if (!f0 || !f1 || !tgt) continue;
+          const midX = (f0.right + tgt.left) / 2;
+          segs.push([f0.right, f0.cy, midX, f0.cy]);   // saída do jogo de cima
+          segs.push([f1.right, f1.cy, midX, f1.cy]);   // saída do jogo de baixo
+          segs.push([midX, f0.cy, midX, f1.cy]);       // linha vertical ligando o par
+          segs.push([midX, tgt.cy, tgt.left, tgt.cy]); // entrada no jogo seguinte
+        }
+      }
+      setLines(segs);
+      setSvgDim({ w: wrap.offsetWidth, h: wrap.offsetHeight });
+    }
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(wrap);
+    window.addEventListener('resize', compute);
+    return () => { ro.disconnect(); window.removeEventListener('resize', compute); };
+  }, [bracket, bella]);
 
   useEffect(() => {
     if (picks === null || locked) return;
@@ -88,7 +132,12 @@ export default function MataMata() {
       </div>
 
       <div className="overflow-x-auto -mx-4 px-4 pb-4">
-        <div className="kobracket">
+        <div className="kobracket" ref={wrapRef}>
+          <svg className="kolines" width={svgDim.w} height={svgDim.h} aria-hidden="true">
+            {lines.map((l, i) => (
+              <line key={i} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} stroke="rgba(255,255,255,0.16)" strokeWidth="2" />
+            ))}
+          </svg>
           {bracket.rounds.map((round) => (
             <div key={round.key} className="koround">
               <div className="kohead">
@@ -98,6 +147,7 @@ export default function MataMata() {
                 {round.slots.map((slot) => (
                   <MatchBox
                     key={slot.id}
+                    innerRef={(el) => { matchRefs.current[slot.id] = el; }}
                     slot={slot}
                     roundKey={round.key}
                     teams={resolveSlotTeams(bracket, slot.id, picks)}
@@ -191,7 +241,7 @@ function TeamRow({ side, team, score, isAdv, isDraw, canEditScore, canPickAdvanc
   );
 }
 
-function MatchBox({ slot, roundKey, teams, pick, editable, teamLabel, onScore, onAdvance }) {
+function MatchBox({ innerRef, slot, roundKey, teams, pick, editable, teamLabel, onScore, onAdvance }) {
   const ready = !!(teams.home && teams.away);
   const canEditScore = editable && ready;
   const hasBoth = Number.isInteger(pick?.homeScore) && Number.isInteger(pick?.awayScore);
@@ -201,7 +251,7 @@ function MatchBox({ slot, roundKey, teams, pick, editable, teamLabel, onScore, o
   const dt = slot.game?.startTime;
 
   return (
-    <article className="komatch card bg-surface-2 p-1.5">
+    <article ref={innerRef} className="komatch card bg-surface-2 p-1.5">
       <div className="flex items-center justify-between px-1 mb-0.5">
         <span className="text-[9px] text-slate uppercase tracking-wide font-bold">Jogo {slot.index + 1}</span>
         {dt && <span className="text-[9px] text-slate">{formatDate(dt)} {formatTime(dt)}</span>}
