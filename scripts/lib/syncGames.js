@@ -59,8 +59,14 @@ async function syncGames() {
         const meta = {};
         let changed = false;
         for (const key of META_FIELDS) {
-          if (normalizeValue(existing.data[key]) !== normalizeValue(game[key])) {
-            meta[key] = game[key] === undefined ? null : game[key];
+          const incoming = game[key];
+          const current = existing.data[key];
+          // Nao apaga um valor ja preenchido com um vazio vindo da API.
+          // (Ex.: confrontos de mata-mata definidos manualmente nao podem ser
+          //  zerados quando a API ainda traz o jogo como "A definir".)
+          if (!incoming && current) continue;
+          if (normalizeValue(current) !== normalizeValue(incoming)) {
+            meta[key] = incoming === undefined ? null : incoming;
             changed = true;
           }
         }

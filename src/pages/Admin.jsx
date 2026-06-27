@@ -7,6 +7,7 @@ import { DEFAULT_POOL_SETTINGS, subscribePoolSettings, savePoolSettings, subscri
 import { createPool, getPoolMembers, getPoolsForAdmin, joinPoolWithPassword } from '../services/poolService';
 import { useAuth } from '../routes/AuthContext';
 import { formatDateTime } from '../utils/dates';
+import { stageLabel } from '../utils/stages';
 import Loading from '../components/Loading';
 
 const TABS = [
@@ -419,7 +420,7 @@ function GameRow({ game, busy, onRun }) {
       <div className="flex items-center justify-between gap-3 mb-2">
         <div className="min-w-0">
           <p className="font-semibold text-white truncate text-sm">{game.homeTeam} × {game.awayTeam}</p>
-          <p className="text-[11px] text-slate">{formatDateTime(game.startTime)} · {game.stage}</p>
+          <p className="text-[11px] text-slate">{formatDateTime(game.startTime)} · {stageLabel(game.stage)}</p>
         </div>
         <span className={`chip ${game.status === 'finished' ? 'bg-white/8 text-slate' : game.status === 'live' ? 'bg-red-500/20 text-red-400' : 'bg-green/20 text-green-light'}`}>
           {STATUS_LABELS[game.status] || game.status}

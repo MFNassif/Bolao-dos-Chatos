@@ -159,7 +159,7 @@ export default function Predictions() {
         <div className="card bg-surface-2 p-4">
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] text-slate uppercase tracking-wider font-semibold">
-              {currentGame.stage}{currentGame.group ? ` · Grupo ${currentGame.group}` : ''}
+              {stageLabel(currentGame.stage)}{currentGame.group ? ` · Grupo ${currentGame.group}` : ''}
             </span>
             <span className={`chip ${
               currentGame.status === 'live'     ? 'bg-red-500/20 text-red-400 animate-pulse' :

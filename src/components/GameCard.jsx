@@ -4,6 +4,7 @@ import { isLocked, lockTimeMs, formatCountdown } from '../utils/locks';
 import { useBella } from '../routes/BellaContext';
 import { useAuth } from '../routes/AuthContext';
 import { getFullName } from '../utils/teamNames';
+import { stageLabel } from '../utils/stages';
 
 export default function GameCard({ game, children }) {
   const { bella } = useBella();
@@ -41,7 +42,7 @@ export default function GameCard({ game, children }) {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <span className="text-[11px] text-slate font-semibold uppercase tracking-wider truncate pr-2">
-          {game.stage}{game.group ? ` · Grupo ${game.group}` : ''}
+          {stageLabel(game.stage)}{game.group ? ` · Grupo ${game.group}` : ''}
         </span>
         <span className={`chip shrink-0 ${statusInfo.cls}`}>{statusInfo.label}</span>
       </div>
