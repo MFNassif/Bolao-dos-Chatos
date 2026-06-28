@@ -267,7 +267,7 @@ export async function recalculateAllPools() {
 
   // Agregado global por usuario (pontuacao padrao) — base p/ semear novos boloes.
   // Inclui quem tem palpite do mata-mata mesmo sem palpite comum.
-  const allUids = new Set([...countByUid.keys(), ...koPointsByUid.keys()]);
+  const allUids = new Set([...countByUid.keys(), ...koCountsByUid.keys()]);
   for (const uid of allUids) {
     const agg = aggregate(uid, POINTS_EXACT, POINTS_RESULT);
     batch.set(doc(db, 'users', uid), {
