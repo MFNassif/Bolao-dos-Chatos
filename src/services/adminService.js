@@ -203,15 +203,34 @@ export async function recalculateAllScores() {
  * boloes fica sempre certo sem precisar do botao manual.
  */
 export async function recalculateAllPools() {
-  const [gamesSnap, membersSnap, poolsSnap, predsSnap, koSnap] = await Promise.all([
+  const [gamesSnap, membersSnap, poolsSnap, predsSnap, poolPredsSnap, koSnap] = await Promise.all([
     getDocs(collection(db, 'games')),
     getDocs(collection(db, 'poolMembers')),
     getDocs(collection(db, 'pools')),
     getDocs(collection(db, 'predictions')),
+    getDocs(collection(db, 'poolPredictions')),
     getDocs(collection(db, 'knockoutPredictions'))
   ]);
 
   const gameById = new Map(gamesSnap.docs.map(g => [g.id, g.data()]));
+  const predsByUid = new Map();
+  for (const p of predsSnap.docs) {
+    const pred = p.data();
+    if (!pred.userId || !pred.gameId) continue;
+    if (!predsByUid.has(pred.userId)) predsByUid.set(pred.userId, new Map());
+    predsByUid.get(pred.userId).set(pred.gameId, pred);
+  }
+
+  // poolPredictions e a copia visivel dentro de cada bolao. Quando existir,
+  // ela vence o palpite global daquele usuario/jogo para o ranking do bolao.
+  const poolPredsByMember = new Map();
+  for (const p of poolPredsSnap.docs) {
+    const pred = p.data();
+    if (!pred.poolId || !pred.userId || !pred.gameId) continue;
+    const key = memberKey(pred.poolId, pred.userId);
+    if (!poolPredsByMember.has(key)) poolPredsByMember.set(key, new Map());
+    poolPredsByMember.get(key).set(pred.gameId, pred);
+  }
 
   // Acertos do Mata-Mata por usuario (winner/cravada). Os PONTOS valem o dobro
   // da pontuacao convencional de CADA bolao, entao sao aplicados por bolao.
@@ -229,34 +248,44 @@ export async function recalculateAllPools() {
   // Acertos por usuario (so jogos com placar). exact/result independem da
   // pontuacao do bolao; o erro de gols tambem. So o total de pontos varia
   // conforme as configuracoes de cada bolao.
-  const hitsByUid = new Map();
   const countByUid = new Map();
-  for (const p of predsSnap.docs) {
-    const pred = p.data();
-    if (!pred.userId) continue;
-    countByUid.set(pred.userId, (countByUid.get(pred.userId) || 0) + 1);
-    const game = gameById.get(pred.gameId);
-    if (!game || !isScoreableGame(game)) continue;
-    const res = scorePrediction(
-      { home: pred.homePrediction, away: pred.awayPrediction },
-      { home: game.homeScore, away: game.awayScore }
-    );
-    const ge = goalError(
-      { home: pred.homePrediction, away: pred.awayPrediction },
-      { home: game.homeScore, away: game.awayScore }
-    );
-    if (!hitsByUid.has(pred.userId)) hitsByUid.set(pred.userId, []);
-    hitsByUid.get(pred.userId).push({ exact: res.exactScoreHit, result: res.resultHit, ge });
+  for (const [uid, predMap] of predsByUid.entries()) {
+    countByUid.set(uid, predMap.size);
+  }
+
+  function aggregatePredictions(predictions, exactPts, resultPts) {
+    let totalPoints = 0, exactScores = 0, correctResults = 0, goalErrorSum = 0;
+    for (const pred of predictions || []) {
+      if (!pred?.gameId) continue;
+      const game = gameById.get(pred.gameId);
+      if (!game || !isScoreableGame(game)) continue;
+      const res = scorePrediction(
+        { home: pred.homePrediction, away: pred.awayPrediction },
+        { home: game.homeScore, away: game.awayScore },
+        { exactScorePoints: exactPts, correctResultPoints: resultPts }
+      );
+      totalPoints += res.points || 0;
+      if (res.exactScoreHit) exactScores += 1;
+      if (res.resultHit) correctResults += 1;
+      goalErrorSum += goalError(
+        { home: pred.homePrediction, away: pred.awayPrediction },
+        { home: game.homeScore, away: game.awayScore }
+      );
+    }
+    return { totalPoints, exactScores, correctResults, goalError: goalErrorSum };
   }
 
   function aggregate(uid, exactPts, resultPts) {
-    let totalPoints = 0, exactScores = 0, correctResults = 0, goalErrorSum = 0;
-    for (const h of (hitsByUid.get(uid) || [])) {
-      if (h.exact) { totalPoints += exactPts; exactScores += 1; correctResults += 1; }
-      else if (h.result) { totalPoints += resultPts; correctResults += 1; }
-      goalErrorSum += h.ge;
+    return aggregatePredictions((predsByUid.get(uid) || new Map()).values(), exactPts, resultPts);
+  }
+
+  function poolPredictionsForMember(poolId, uid) {
+    const combined = new Map(predsByUid.get(uid) || []);
+    const overrides = poolPredsByMember.get(memberKey(poolId, uid));
+    if (overrides) {
+      for (const [gameId, pred] of overrides.entries()) combined.set(gameId, pred);
     }
-    return { totalPoints, exactScores, correctResults, goalError: goalErrorSum };
+    return combined;
   }
 
   let batch = writeBatch(db);
@@ -287,11 +316,12 @@ export async function recalculateAllPools() {
     const s = settingsByPool.get(md.poolId) || DEFAULT_POOL_SETTINGS;
     const exactPts = Number.isFinite(Number(s.exactScorePoints)) ? Number(s.exactScorePoints) : POINTS_EXACT;
     const resultPts = Number.isFinite(Number(s.correctResultPoints)) ? Number(s.correctResultPoints) : POINTS_RESULT;
-    const agg = aggregate(md.uid, exactPts, resultPts);
+    const poolPreds = poolPredictionsForMember(md.poolId, md.uid);
+    const agg = aggregatePredictions(poolPreds.values(), exactPts, resultPts);
     batch.set(member.ref, {
       ...agg,
       knockoutPoints: koPoints(md.uid, exactPts, resultPts),
-      predictionsCount: countByUid.get(md.uid) || 0,
+      predictionsCount: poolPreds.size,
       updatedAt: serverTimestamp()
     }, { merge: true });
     ops += 1;
@@ -306,8 +336,18 @@ export async function recalculatePoolScores(poolId) {
   if (!poolId) throw new Error('Bolao ativo nao encontrado.');
 
   const settings = await getPoolSettings(poolId);
-  const membersSnap = await getDocs(query(collection(db, 'poolMembers'), where('poolId', '==', poolId)));
+  const [membersSnap, poolPredsSnap] = await Promise.all([
+    getDocs(query(collection(db, 'poolMembers'), where('poolId', '==', poolId))),
+    getDocs(query(collection(db, 'poolPredictions'), where('poolId', '==', poolId)))
+  ]);
   const memberByUid = new Map(membersSnap.docs.map(member => [member.data().uid, member]));
+  const poolPredsByUid = new Map();
+  poolPredsSnap.docs.forEach(predDoc => {
+    const pred = predDoc.data();
+    if (!pred.userId || !pred.gameId) return;
+    if (!poolPredsByUid.has(pred.userId)) poolPredsByUid.set(pred.userId, new Map());
+    poolPredsByUid.get(pred.userId).set(pred.gameId, pred);
+  });
   const aggregates = new Map();
 
   membersSnap.docs.forEach(member => {
@@ -334,11 +374,19 @@ export async function recalculatePoolScores(poolId) {
     if (!uid || !agg) continue;
 
     const predsSnap = await getDocs(query(collection(db, 'predictions'), where('userId', '==', uid)));
-    totalPredictions += predsSnap.size;
-    agg.predictionsCount = predsSnap.size;
-
+    const combined = new Map();
     predsSnap.docs.forEach(predDoc => {
       const pred = predDoc.data();
+      if (pred.gameId) combined.set(pred.gameId, pred);
+    });
+    const overrides = poolPredsByUid.get(uid);
+    if (overrides) {
+      for (const [gameId, pred] of overrides.entries()) combined.set(gameId, pred);
+    }
+    totalPredictions += combined.size;
+    agg.predictionsCount = combined.size;
+
+    combined.forEach(pred => {
       const game = gameById.get(pred.gameId);
       if (!game || !isScoreableGame(game)) return;
 
@@ -474,16 +522,27 @@ async function recalculatePoolMemberAggregate(memberDoc) {
   if (!member.uid || !member.poolId) return;
 
   const settings = await getPoolSettings(member.poolId);
-  const predsSnap = await getDocs(query(collection(db, 'predictions'), where('userId', '==', member.uid)));
+  const [predsSnap, poolPredsSnap] = await Promise.all([
+    getDocs(query(collection(db, 'predictions'), where('userId', '==', member.uid))),
+    getDocs(query(collection(db, 'poolPredictions'), where('userId', '==', member.uid)))
+  ]);
   const gameCache = new Map();
+  const combined = new Map();
+  predsSnap.docs.forEach(predDoc => {
+    const pred = predDoc.data();
+    if (pred.gameId) combined.set(pred.gameId, pred);
+  });
+  poolPredsSnap.docs.forEach(predDoc => {
+    const pred = predDoc.data();
+    if (pred.poolId === member.poolId && pred.gameId) combined.set(pred.gameId, pred);
+  });
 
   let totalPoints = 0;
   let exactScores = 0;
   let correctResults = 0;
   let goalErrorSum = 0;
 
-  for (const p of predsSnap.docs) {
-    const pred = p.data();
+  for (const pred of combined.values()) {
     const game = await getGameForPrediction(pred.gameId, gameCache);
     if (!game || !isScoreableGame(game)) continue;
 
@@ -506,9 +565,13 @@ async function recalculatePoolMemberAggregate(memberDoc) {
     exactScores,
     correctResults,
     goalError: goalErrorSum,
-    predictionsCount: predsSnap.size,
+    predictionsCount: combined.size,
     updatedAt: serverTimestamp()
   }, { merge: true }).commit();
+}
+
+function memberKey(poolId, uid) {
+  return `${poolId}_${uid}`;
 }
 
 async function getPoolSettings(poolId) {

@@ -82,15 +82,16 @@ async function recalculateGame(gameId, { recalculateUsers = true } = {}) {
   if (writes > 0) await batch.commit();
 
   if (recalculateUsers && deltas.size > 0) {
-    await applyAggregateDeltas(deltas);
+    await applyAggregateDeltas(deltas, gameId);
   }
   return { predictions: preds.size, users: deltas.size, changed: writes };
 }
 
-async function applyAggregateDeltas(deltas) {
+async function applyAggregateDeltas(deltas, gameId) {
   const firestore = db();
   const inc = admin.firestore.FieldValue.increment;
   const settingsCache = new Map();
+  const predDocsCache = new Map();
 
   for (const [uid, d] of deltas.entries()) {
     if (!d.points && !d.exact && !d.result) continue;
@@ -106,6 +107,18 @@ async function applyAggregateDeltas(deltas) {
     for (const member of members.docs) {
       const poolId = member.data().poolId;
       if (!poolId) continue;
+      const override = await firestore.collection('poolPredictions').doc(`${poolId}_${gameId}_${uid}`).get();
+      if (override.exists) {
+        if (!predDocsCache.has(uid)) {
+          const snap = await firestore.collection('predictions').where('userId', '==', uid).get();
+          predDocsCache.set(uid, snap.docs);
+        }
+        await recalculatePoolMemberAggregate(member, predDocsCache.get(uid), {
+          gameCache: new Map(),
+          settingsCache
+        });
+        continue;
+      }
       const settings = await getPoolSettings(poolId, settingsCache);
       const exactPts = toNumber(settings.exactScorePoints, DEFAULT_POOL_SETTINGS.exactScorePoints);
       const resultPts = toNumber(settings.correctResultPoints, DEFAULT_POOL_SETTINGS.correctResultPoints);
@@ -178,6 +191,35 @@ async function recalculateAll() {
   return { predictions, users: users.size };
 }
 
+async function recalculatePool(poolId) {
+  if (!poolId) throw new Error('poolId obrigatorio.');
+  const firestore = db();
+  const members = await firestore.collection('poolMembers').where('poolId', '==', poolId).get();
+  const gameCache = new Map();
+  const settingsCache = new Map();
+  let predictions = 0;
+
+  for (const member of members.docs) {
+    const uid = member.data().uid;
+    if (!uid) continue;
+    const snap = await firestore.collection('predictions').where('userId', '==', uid).get();
+    const result = await recalculatePoolMemberAggregate(member, snap.docs, { gameCache, settingsCache });
+    predictions += result.predictions || 0;
+  }
+
+  await firestore.collection('syncLogs').add({
+    type: 'recalculatePool',
+    success: true,
+    message: `Recalculo do bolao ${poolId}: ${predictions} palpites, ${members.size} usuarios.`,
+    poolId,
+    predictions,
+    users: members.size,
+    createdAt: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  return { poolId, predictions, users: members.size };
+}
+
 async function recalculateUserPoolMemberships(uid, predDocs, caches) {
   const firestore = db();
   const members = await firestore.collection('poolMembers').where('uid', '==', uid).get();
@@ -191,14 +233,23 @@ async function recalculatePoolMemberAggregate(memberDoc, predDocs, caches) {
   if (!member.uid || !member.poolId) return;
 
   const settings = await getPoolSettings(member.poolId, caches.settingsCache);
+  const combined = new Map();
+  for (const p of predDocs) {
+    const pred = p.data();
+    if (pred.gameId) combined.set(pred.gameId, pred);
+  }
+  const poolPreds = await db().collection('poolPredictions').where('userId', '==', member.uid).get();
+  for (const p of poolPreds.docs) {
+    const pred = p.data();
+    if (pred.poolId === member.poolId && pred.gameId) combined.set(pred.gameId, pred);
+  }
 
   let totalPoints = 0;
   let exactScores = 0;
   let correctResults = 0;
   let goalErrorSum = 0;
 
-  for (const p of predDocs) {
-    const pred = p.data();
+  for (const pred of combined.values()) {
     const game = await getGameForPrediction(pred.gameId, caches.gameCache);
     if (!game || !isScoreableGame(game)) continue;
     const result = scorePrediction(
@@ -220,9 +271,11 @@ async function recalculatePoolMemberAggregate(memberDoc, predDocs, caches) {
     exactScores,
     correctResults,
     goalError: goalErrorSum,
-    predictionsCount: predDocs.length,
+    predictionsCount: combined.size,
     updatedAt: admin.firestore.FieldValue.serverTimestamp()
   }, { merge: true });
+
+  return { predictions: combined.size };
 }
 
 async function getPoolSettings(poolId, cache) {
@@ -254,4 +307,4 @@ function toNumber(value, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-module.exports = { recalculateGame, recalculateAll, recalculateUserAggregates };
+module.exports = { recalculateGame, recalculateAll, recalculatePool, recalculateUserAggregates };
