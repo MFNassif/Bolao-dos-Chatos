@@ -1,0 +1,35 @@
+name: Import Nassifs CAN RSA
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-nassifs-can-rsa.yml'
+      - 'scripts/importNassifsCanRsaFromKnockout.js'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: scripts/package-lock.json
+
+      - name: Install deps
+        working-directory: scripts
+        run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Import Nassifs Canada x South Africa
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT_B64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_B64 }}
+        run: node importNassifsCanRsaFromKnockout.js
