@@ -382,6 +382,7 @@ function GameRow({ game, busy, onRun, teams = [] }) {
   const [editingTeams, setEditingTeams] = useState(false);
   const [homeSel, setHomeSel] = useState('__keep__');
   const [awaySel, setAwaySel] = useState('__keep__');
+  const [advancer, setAdvancer] = useState('');
   const isKnockout = !game.group;
 
   function openTeams() {
@@ -407,8 +408,12 @@ function GameRow({ game, busy, onRun, teams = [] }) {
     setHome(Number.isInteger(game.homeScore) ? String(game.homeScore) : '');
     setAway(Number.isInteger(game.awayScore) ? String(game.awayScore) : '');
     setStatus(game.status || 'scheduled');
+    setAdvancer(game.advancer === 'home' || game.advancer === 'away' ? game.advancer : '');
     setEditing(true);
   }
+
+  // Empate no mata-mata precisa do classificado (pênaltis).
+  const isDraw = home !== '' && away !== '' && Number(home) === Number(away);
 
   async function save() {
     await onRun('Salvar resultado', async () => {
@@ -416,7 +421,8 @@ function GameRow({ game, busy, onRun, teams = [] }) {
         gameId: game.id,
         homeScore: home === '' ? null : Number(home),
         awayScore: away === '' ? null : Number(away),
-        status
+        status,
+        advancer: isKnockout && isDraw ? (advancer || undefined) : undefined
       });
       return { message: 'Resultado salvo. Pontuação e ranking atualizados.' };
     });
@@ -509,17 +515,34 @@ function GameRow({ game, busy, onRun, teams = [] }) {
               <option value="finished">✅ Encerrado</option>
             </select>
           </div>
+          {isKnockout && isDraw && status !== 'scheduled' && (
+            <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/30 p-2">
+              <p className="text-[11px] text-yellow-400 font-semibold mb-1">Empate no mata-mata — quem avançou (pênaltis)?</p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setAdvancer('home')}
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${advancer === 'home' ? 'bg-green text-white border-green' : 'bg-white/6 text-slate border-white/10'}`}>
+                  {game.homeTeam || 'Mandante'}
+                </button>
+                <button type="button" onClick={() => setAdvancer('away')}
+                  className={`text-xs px-3 py-1.5 rounded-lg border ${advancer === 'away' ? 'bg-green text-white border-green' : 'bg-white/6 text-slate border-white/10'}`}>
+                  {game.awayTeam || 'Visitante'}
+                </button>
+              </div>
+            </div>
+          )}
           {scoresButScheduled ? (
             <p className="text-[11px] text-yellow-400">⚠️ Salvar como <b>“Não começou”</b> vai <b>apagar o placar</b>. Marque <b>Ao vivo</b> ou <b>Encerrado</b> para registrar o resultado.</p>
           ) : (
             <p className="text-[11px] text-slate">
-              {willScore
-                ? 'Ao salvar, este placar conta para a pontuação e o ranking é recalculado na hora.'
-                : 'O placar conta quando o jogo está ao vivo ou encerrado.'}
+              {isKnockout
+                ? 'Ao salvar, o classificado avança automaticamente para a próxima fase (aba Jogos e Mata-Mata).'
+                : willScore
+                  ? 'Ao salvar, este placar conta para a pontuação e o ranking é recalculado na hora.'
+                  : 'O placar conta quando o jogo está ao vivo ou encerrado.'}
             </p>
           )}
           <div className="flex gap-2">
-            <button className="btn-primary text-xs" disabled={busy} onClick={save}>Salvar e pontuar</button>
+            <button className="btn-primary text-xs" disabled={busy || (isKnockout && isDraw && status !== 'scheduled' && !advancer)} onClick={save}>Salvar e pontuar</button>
             <button className="btn-ghost text-xs" disabled={busy} onClick={() => setEditing(false)}>Cancelar</button>
           </div>
         </div>

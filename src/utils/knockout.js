@@ -162,22 +162,58 @@ function samePair(p, q) {
     (sameTeam(p.home, q.away) && sameTeam(p.away, q.home));
 }
 
-// Quem AVANÇOU oficialmente de um slot (resolve pênaltis):
-//  - vitória no tempo normal: vem do winner do jogo;
-//  - empate (pênaltis): deriva pelo time que aparece na fase seguinte oficial.
+// Lado que avançou oficialmente de um jogo, a partir SÓ do próprio jogo:
+//  - placar decisivo → quem fez mais gols;
+//  - empate → escolha do admin (game.advancer, pênaltis);
+//  - indefinido → null.
+export function officialAdvanceSideOfGame(game) {
+  if (!game) return null;
+  const h = Number.isInteger(game.homeScore);
+  const a = Number.isInteger(game.awayScore);
+  if (h && a && game.homeScore !== game.awayScore) {
+    return game.homeScore > game.awayScore ? 'home' : 'away';
+  }
+  if (game.advancer === 'home' || game.advancer === 'away') return game.advancer;
+  return null;
+}
+
+// Quem AVANÇOU oficialmente de um slot (resolve pênaltis pelo game.advancer).
 export function officialAdvancer(bracket, roundKey, index) {
   const order = ROUNDS.map((r) => r.key);
   const ri = order.indexOf(roundKey);
   const slot = bracket.rounds[ri]?.slots[index];
   const game = slot?.game;
   if (!game) return null;
-  if (game.winner === 'home') return teamOf(game, 'home');
-  if (game.winner === 'away') return teamOf(game, 'away');
-  // Empate → o classificado é quem aparece no jogo oficial da proxima fase.
-  if (ri >= order.length - 1) return null; // final: sem fase seguinte para derivar
+  const side = officialAdvanceSideOfGame(game);
+  if (side) return teamOf(game, side);
+  // Fallback (empate sem escolha): deriva pelo time que aparece na fase seguinte.
+  if (ri >= order.length - 1) return null;
   const parent = bracket.rounds[ri + 1]?.slots[Math.floor(index / 2)];
   if (!parent?.game) return null;
   return teamOf(parent.game, index % 2 === 0 ? 'home' : 'away');
+}
+
+// Times que já foram ELIMINADOS oficialmente (perderam um jogo de mata-mata
+// decidido). Retorna um Set de códigos (e nomes, p/ placeholders).
+export function computeEliminatedTeams(bracket) {
+  const out = new Set();
+  if (!bracket) return out;
+  for (const round of bracket.rounds) {
+    for (const slot of round.slots) {
+      const g = slot.game;
+      const side = officialAdvanceSideOfGame(g);
+      if (!side) continue;
+      const loser = teamOf(g, side === 'home' ? 'away' : 'home');
+      if (loser?.code) out.add(loser.code);
+      if (loser?.name) out.add(loser.name);
+    }
+  }
+  return out;
+}
+
+export function isEliminated(team, eliminated) {
+  if (!team || !eliminated) return false;
+  return (team.code && eliminated.has(team.code)) || (team.name && eliminated.has(team.name));
 }
 
 /**

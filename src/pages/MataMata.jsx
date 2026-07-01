@@ -7,7 +7,7 @@ import { subscribePoolSettings } from '../services/settingsService';
 import { getPoolMembers } from '../services/poolService';
 import {
   buildBracket, resolveSlotTeams, isKnockoutLocked, parentChainIds,
-  effectiveAdvanceSide, slotId, KNOCKOUT_DEADLINE_MS
+  effectiveAdvanceSide, slotId, computeEliminatedTeams, isEliminated, KNOCKOUT_DEADLINE_MS
 } from '../utils/knockout';
 import { getFullName } from '../utils/teamNames';
 import { formatDate, formatTime, formatDateTime } from '../utils/dates';
@@ -56,6 +56,7 @@ export default function MataMata() {
   useEffect(() => { if (savedDoc && picks === null) setPicks(savedDoc.picks || {}); }, [savedDoc, picks]);
 
   const bracket = useMemo(() => (games ? buildBracket(games) : null), [games]);
+  const eliminated = useMemo(() => computeEliminatedTeams(bracket), [bracket]);
 
   // Conectores do chaveamento desenhados em SVG, medindo a posição real de
   // cada card (o espaçamento é dinâmico, então linhas em CSS fixo não alinham).
@@ -202,6 +203,7 @@ export default function MataMata() {
                     teams={resolveSlotTeams(bracket, slot.id, displayPicks)}
                     pick={displayPicks[slot.id]}
                     editable={editable}
+                    eliminated={eliminated}
                     teamLabel={teamLabel}
                     onScore={setScore}
                     onAdvance={setAdvance}
@@ -264,22 +266,24 @@ function Countdown({ locked }) {
   );
 }
 
-function TeamRow({ side, team, score, isAdv, isDraw, canEditScore, canPickAdvance, teamLabel, onScore, onAdvance }) {
+function TeamRow({ side, team, score, isAdv, isDraw, canEditScore, canPickAdvance, elim, teamLabel, onScore, onAdvance }) {
+  // Time eliminado que o usuário marcou como classificado: bolinha vermelha ✕.
+  const dotClass = isAdv && elim ? 'border-red-500 bg-red-500 text-white'
+    : isAdv ? 'border-green bg-green text-white'
+      : 'border-white/25 text-transparent';
   return (
-    <div className={`flex items-center gap-1 px-1 py-1 rounded-md transition ${isAdv ? 'bg-green/15 ring-1 ring-green/30' : ''}`}>
+    <div className={`flex items-center gap-1 px-1 py-1 rounded-md transition ${isAdv && elim ? 'bg-red-500/10 ring-1 ring-red-500/30' : isAdv ? 'bg-green/15 ring-1 ring-green/30' : ''}`}>
       <button
         type="button"
         disabled={!canPickAdvance}
         onClick={canPickAdvance ? onAdvance : undefined}
-        title={canPickAdvance ? 'Quem passou nos pênaltis' : (isAdv ? 'Avança (mais gols)' : '')}
-        className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center text-[8px] ${
-          isAdv ? 'border-green bg-green text-white' : 'border-white/25 text-transparent'
-        } ${canPickAdvance ? 'hover:border-green cursor-pointer' : 'cursor-default'}`}
-      >✓</button>
-      <span className="w-5 h-5 rounded bg-white/8 border border-white/10 overflow-hidden flex items-center justify-center shrink-0">
+        title={isAdv && elim ? 'Este time foi eliminado' : canPickAdvance ? 'Quem passou nos pênaltis' : (isAdv ? 'Avança (mais gols)' : '')}
+        className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center text-[8px] ${dotClass} ${canPickAdvance ? 'hover:border-green cursor-pointer' : 'cursor-default'}`}
+      >{isAdv && elim ? '✕' : '✓'}</button>
+      <span className={`w-5 h-5 rounded bg-white/8 border border-white/10 overflow-hidden flex items-center justify-center shrink-0 ${elim ? 'opacity-30 grayscale' : ''}`}>
         {team?.flag ? <img src={team.flag} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[7px] text-slate">{team?.code?.slice(0, 3) || '?'}</span>}
       </span>
-      <span className={`flex-1 text-[11px] font-semibold truncate ${team ? 'text-white' : 'text-slate italic'}`}>{teamLabel(team) || 'A definir'}</span>
+      <span className={`flex-1 text-[11px] font-semibold truncate ${!team ? 'text-slate italic' : elim ? 'line-through text-slate' : 'text-white'}`}>{teamLabel(team) || 'A definir'}</span>
       <input
         inputMode="numeric" pattern="[0-9]*" disabled={!canEditScore}
         value={Number.isInteger(score) ? score : ''}
@@ -291,7 +295,7 @@ function TeamRow({ side, team, score, isAdv, isDraw, canEditScore, canPickAdvanc
   );
 }
 
-function MatchBox({ innerRef, slot, roundKey, teams, pick, editable, teamLabel, onScore, onAdvance }) {
+function MatchBox({ innerRef, slot, roundKey, teams, pick, editable, eliminated, teamLabel, onScore, onAdvance }) {
   const ready = !!(teams.home && teams.away);
   const canEditScore = editable && ready;
   const hasBoth = Number.isInteger(pick?.homeScore) && Number.isInteger(pick?.awayScore);
@@ -316,6 +320,7 @@ function MatchBox({ innerRef, slot, roundKey, teams, pick, editable, teamLabel, 
           isDraw={isDraw}
           canEditScore={canEditScore}
           canPickAdvance={canPickAdvance}
+          elim={isEliminated(teams[side], eliminated)}
           teamLabel={teamLabel}
           onScore={(s, raw) => onScore(roundKey, slot.index, slot.id, s, raw)}
           onAdvance={() => onAdvance(roundKey, slot.index, slot.id, side)}

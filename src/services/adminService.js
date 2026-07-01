@@ -11,12 +11,13 @@ import {
 import { db } from './firebase';
 import { DEFAULT_POOL_SETTINGS } from './settingsService';
 import { scorePrediction, goalError, POINTS_EXACT, POINTS_RESULT } from '../utils/scoring';
-import { buildBracket, computeKnockoutCounts, knockoutPointsFromCounts } from '../utils/knockout';
+import { buildBracket, computeKnockoutCounts, knockoutPointsFromCounts, officialAdvanceSideOfGame } from '../utils/knockout';
 
-export async function setGameResult({ gameId, homeScore, awayScore, status }) {
+export async function setGameResult({ gameId, homeScore, awayScore, status, advancer }) {
   const gameRef = doc(db, 'games', gameId);
   const gameSnap = await getDoc(gameRef);
   if (!gameSnap.exists()) throw new Error('Jogo nao encontrado.');
+  const isKnockout = !gameSnap.data().group;
 
   const payload = { lastUpdatedAt: serverTimestamp() };
   payload.homeScore = (homeScore === null || homeScore === undefined || homeScore === '')
@@ -39,12 +40,20 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   } else {
     payload.winner = null;
   }
+  // Classificado do mata-mata: placar decisivo define sozinho; empate usa a
+  // escolha do admin (pênaltis). Serve para preencher a fase seguinte.
+  const decisive = Number.isInteger(payload.homeScore) && Number.isInteger(payload.awayScore) &&
+    payload.homeScore !== payload.awayScore;
+  if (decisive) payload.advancer = payload.homeScore > payload.awayScore ? 'home' : 'away';
+  else if (advancer === 'home' || advancer === 'away') payload.advancer = advancer;
+  else payload.advancer = null;
   // "Não começou" = sem resultado: limpa o placar para nao haver jogo
   // scheduled com placar (que apareceria e contaria de forma inconsistente).
   if (payload.status === 'scheduled') {
     payload.homeScore = null;
     payload.awayScore = null;
     payload.winner = null;
+    payload.advancer = null;
   }
 
   await writeBatch(db).set(gameRef, payload, { merge: true }).commit();
@@ -53,6 +62,8 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   // sem precisar do botao "Recalcular" manual.
   await recalculateGameScores(gameId, { recalculateUsers: false });
   await recalculateAllPools();
+  // Mata-mata: preenche automaticamente os confrontos das fases seguintes.
+  if (isKnockout) await propagateKnockout();
 
   const logRef = doc(collection(db, 'syncLogs'));
   await writeBatch(db).set(logRef, {
@@ -61,6 +72,48 @@ export async function setGameResult({ gameId, homeScore, awayScore, status }) {
     message: `Resultado ajustado para ${gameId}: ${payload.homeScore ?? '-'} x ${payload.awayScore ?? '-'} (${payload.status || '-'})`,
     createdAt: serverTimestamp()
   }).commit();
+}
+
+/**
+ * Preenche automaticamente os confrontos das fases seguintes do mata-mata:
+ * o classificado de cada jogo decidido vira o time do jogo da fase seguinte,
+ * no lado correto do chaveamento. Idempotente (só escreve o que mudou).
+ */
+async function propagateKnockout() {
+  const gamesSnap = await getDocs(collection(db, 'games'));
+  const games = gamesSnap.docs.map(g => ({ id: g.id, ...g.data() }));
+  const refById = new Map(gamesSnap.docs.map(g => [g.id, g.ref]));
+  const bracket = buildBracket(games);
+
+  const batch = writeBatch(db);
+  let ops = 0;
+  for (let ri = 0; ri < bracket.rounds.length - 1; ri++) {
+    const round = bracket.rounds[ri];
+    const next = bracket.rounds[ri + 1];
+    for (let i = 0; i < round.slots.length; i++) {
+      const g = round.slots[i].game;
+      const side = officialAdvanceSideOfGame(g);
+      if (!side) continue;
+      const code = g[`${side}TeamCode`] || '';
+      const name = g[`${side}Team`] || '';
+      if (!code && !name) continue; // classificado ainda "A definir"
+      const parent = next.slots[Math.floor(i / 2)];
+      if (!parent?.game) continue;
+      const pside = i % 2 === 0 ? 'home' : 'away';
+      if ((parent.game[`${pside}TeamCode`] || '') === code &&
+          (parent.game[`${pside}Team`] || '') === name) continue; // ja esta certo
+      const ref = refById.get(parent.game.id);
+      if (!ref) continue;
+      batch.set(ref, {
+        [`${pside}Team`]: name,
+        [`${pside}TeamCode`]: code,
+        [`${pside}TeamFlag`]: g[`${side}TeamFlag`] || '',
+        lastUpdatedAt: serverTimestamp()
+      }, { merge: true });
+      ops += 1;
+    }
+  }
+  if (ops > 0) await batch.commit();
 }
 
 /**
