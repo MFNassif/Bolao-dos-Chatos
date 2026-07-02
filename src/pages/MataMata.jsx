@@ -281,7 +281,10 @@ function TeamRow({ side, team, score, isAdv, isDraw, canEditScore, canPickAdvanc
         className={`w-4 h-4 rounded-full border-2 shrink-0 flex items-center justify-center text-[8px] ${dotClass} ${canPickAdvance ? 'hover:border-green cursor-pointer' : 'cursor-default'}`}
       >{isAdv && elim ? '✕' : '✓'}</button>
       <span className={`w-5 h-5 rounded bg-white/8 border border-white/10 overflow-hidden flex items-center justify-center shrink-0 ${elim ? 'opacity-30 grayscale' : ''}`}>
-        {team?.flag ? <img src={team.flag} alt="" className="w-full h-full object-cover" loading="lazy" /> : <span className="text-[7px] text-slate">{team?.code?.slice(0, 3) || '?'}</span>}
+        {team?.flag
+          ? <span className="block w-full h-full" role="img" aria-label={team?.code}
+              style={{ backgroundImage: `url("${team.flag}")`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }} />
+          : <span className="text-[7px] text-slate">{team?.code?.slice(0, 3) || '?'}</span>}
       </span>
       <span className={`flex-1 text-[11px] font-semibold truncate ${!team ? 'text-slate italic' : elim ? 'line-through text-slate' : 'text-white'}`}>{teamLabel(team) || 'A definir'}</span>
       <input

@@ -263,7 +263,8 @@ function FlagBox({ flag, code }) {
   return (
     <div className="w-9 h-9 rounded-lg bg-white/8 border border-white/10 overflow-hidden flex items-center justify-center shrink-0">
       {flag
-        ? <img src={flag} alt={code} className="w-full h-full object-cover" loading="lazy" />
+        ? <span className="block w-full h-full" role="img" aria-label={code}
+            style={{ backgroundImage: `url("${flag}")`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }} />
         : <span className="text-[9px] text-slate">{code}</span>
       }
     </div>

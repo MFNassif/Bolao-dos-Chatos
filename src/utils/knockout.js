@@ -162,10 +162,9 @@ function samePair(p, q) {
     (sameTeam(p.home, q.away) && sameTeam(p.away, q.home));
 }
 
-// Lado que avançou oficialmente de um jogo, a partir SÓ do próprio jogo:
-//  - placar decisivo → quem fez mais gols;
-//  - empate → escolha do admin (game.advancer, pênaltis);
-//  - indefinido → null.
+// Lado que avançou APENAS pelo placar do próprio jogo (decisivo). Empate → null
+// (nesse caso o classificado é definido pelo time que o admin colocou na fase
+// seguinte). Usado para propagar automaticamente os confrontos decididos.
 export function officialAdvanceSideOfGame(game) {
   if (!game) return null;
   const h = Number.isInteger(game.homeScore);
@@ -173,11 +172,12 @@ export function officialAdvanceSideOfGame(game) {
   if (h && a && game.homeScore !== game.awayScore) {
     return game.homeScore > game.awayScore ? 'home' : 'away';
   }
-  if (game.advancer === 'home' || game.advancer === 'away') return game.advancer;
   return null;
 }
 
-// Quem AVANÇOU oficialmente de um slot (resolve pênaltis pelo game.advancer).
+// Quem AVANÇOU oficialmente de um slot:
+//  - placar decisivo → quem fez mais gols;
+//  - empate → o time (deste jogo) que o admin colocou no jogo da fase seguinte.
 export function officialAdvancer(bracket, roundKey, index) {
   const order = ROUNDS.map((r) => r.key);
   const ri = order.indexOf(roundKey);
@@ -186,28 +186,35 @@ export function officialAdvancer(bracket, roundKey, index) {
   if (!game) return null;
   const side = officialAdvanceSideOfGame(game);
   if (side) return teamOf(game, side);
-  // Fallback (empate sem escolha): deriva pelo time que aparece na fase seguinte.
+  // Empate: deriva pelo time que aparece no jogo oficial da fase seguinte.
   if (ri >= order.length - 1) return null;
   const parent = bracket.rounds[ri + 1]?.slots[Math.floor(index / 2)];
   if (!parent?.game) return null;
-  return teamOf(parent.game, index % 2 === 0 ? 'home' : 'away');
+  const parentTeam = teamOf(parent.game, index % 2 === 0 ? 'home' : 'away');
+  if (!parentTeam) return null;
+  // Só vale se for um dos dois times deste confronto (senao ainda indefinido).
+  const home = teamOf(game, 'home'), away = teamOf(game, 'away');
+  if (sameTeam(parentTeam, home) || sameTeam(parentTeam, away)) return parentTeam;
+  return null;
 }
 
-// Times que já foram ELIMINADOS oficialmente (perderam um jogo de mata-mata
-// decidido). Retorna um Set de códigos (e nomes, p/ placeholders).
+// Times já ELIMINADOS oficialmente (perderam um jogo de mata-mata decidido).
+// Set de códigos (e nomes, p/ placeholders).
 export function computeEliminatedTeams(bracket) {
   const out = new Set();
   if (!bracket) return out;
-  for (const round of bracket.rounds) {
-    for (const slot of round.slots) {
+  bracket.rounds.forEach((round, ri) => {
+    round.slots.forEach((slot, i) => {
       const g = slot.game;
-      const side = officialAdvanceSideOfGame(g);
-      if (!side) continue;
-      const loser = teamOf(g, side === 'home' ? 'away' : 'home');
+      if (!g) return;
+      const adv = officialAdvancer(bracket, round.key, i);
+      if (!adv) return;
+      const home = teamOf(g, 'home'), away = teamOf(g, 'away');
+      const loser = sameTeam(adv, home) ? away : (sameTeam(adv, away) ? home : null);
       if (loser?.code) out.add(loser.code);
       if (loser?.name) out.add(loser.name);
-    }
-  }
+    });
+  });
   return out;
 }
 

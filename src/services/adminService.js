@@ -13,7 +13,7 @@ import { DEFAULT_POOL_SETTINGS } from './settingsService';
 import { scorePrediction, goalError, POINTS_EXACT, POINTS_RESULT } from '../utils/scoring';
 import { buildBracket, computeKnockoutCounts, knockoutPointsFromCounts, officialAdvanceSideOfGame } from '../utils/knockout';
 
-export async function setGameResult({ gameId, homeScore, awayScore, status, advancer }) {
+export async function setGameResult({ gameId, homeScore, awayScore, status }) {
   const gameRef = doc(db, 'games', gameId);
   const gameSnap = await getDoc(gameRef);
   if (!gameSnap.exists()) throw new Error('Jogo nao encontrado.');
@@ -40,20 +40,12 @@ export async function setGameResult({ gameId, homeScore, awayScore, status, adva
   } else {
     payload.winner = null;
   }
-  // Classificado do mata-mata: placar decisivo define sozinho; empate usa a
-  // escolha do admin (pênaltis). Serve para preencher a fase seguinte.
-  const decisive = Number.isInteger(payload.homeScore) && Number.isInteger(payload.awayScore) &&
-    payload.homeScore !== payload.awayScore;
-  if (decisive) payload.advancer = payload.homeScore > payload.awayScore ? 'home' : 'away';
-  else if (advancer === 'home' || advancer === 'away') payload.advancer = advancer;
-  else payload.advancer = null;
   // "Não começou" = sem resultado: limpa o placar para nao haver jogo
   // scheduled com placar (que apareceria e contaria de forma inconsistente).
   if (payload.status === 'scheduled') {
     payload.homeScore = null;
     payload.awayScore = null;
     payload.winner = null;
-    payload.advancer = null;
   }
 
   await writeBatch(db).set(gameRef, payload, { merge: true }).commit();

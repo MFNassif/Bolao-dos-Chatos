@@ -138,7 +138,8 @@ function Flag({ flag, code, size = 'md' }) {
   return (
     <div className={`${sz} bg-white/8 border border-white/10 overflow-hidden flex items-center justify-center shrink-0`}>
       {flag
-        ? <img src={flag} alt={code} className="w-full h-full object-cover" loading="lazy" />
+        ? <span className="block w-full h-full" role="img" aria-label={code}
+            style={{ backgroundImage: `url("${flag}")`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }} />
         : <span className="text-[9px] font-bold text-slate">{code?.slice(0, 3)}</span>
       }
     </div>
